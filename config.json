@@ -1,0 +1,11 @@
+{
+  "model": "google/gemma-4-E2b-it",
+  "base_url": "http://localhost:1234/v1",
+  "hotkey": "ctrl+alt+g",
+  "temperature": 0,
+  "max_chars": 4000,
+  "timeout_seconds": 60,
+  "clipboard_delay": 0.25,
+  "restore_clipboard": true,
+  "warm_up_on_start": true
+}
