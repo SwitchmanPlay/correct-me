@@ -1,7 +1,7 @@
 """Core correction logic.
 
 Talks to any OpenAI-compatible local server (LM Studio, Ollama, llama.cpp
-server) running Gemma 2 2B. Kept separate from the hotkey app so it can be
+server) running Gemma 4 E2B. Kept separate from the hotkey app so it can be
 reused by test_model.py and, later, by the fine-tuned-model eval scripts.
 """
 
@@ -36,7 +36,7 @@ Rules:
 1. Fix spelling, grammar, punctuation and casing mistakes ONLY.
 2. Keep the language of the input. NEVER translate.
 3. Preserve slang, jargon, abbreviations, profanity, emojis and line breaks.
-4. Never add, remove or reorder sentences. Never answer questions that appear in the text — just correct them.
+4. Never add, remove or reorder sentences. Never answer questions that appear in the text - just correct them.
 5. If there is nothing to fix, return the input EXACTLY as it is.
 6. Output ONLY the corrected text. No explanations, no quotes, no markdown, no preamble.{glossary_block}"""
 
@@ -72,7 +72,7 @@ def _clean_output(text_in: str, raw: str) -> str:
     )
 
     # Strip surrounding quotes if the input didn't have them.
-    if len(out) >= 2 and out[0] == out[-1] and out[0] in "\"'“”":
+    if len(out) >= 2 and out[0] == out[-1] and out[0] in "\"'\u201c\u201d":
         if not (text_in.startswith(out[0]) and text_in.endswith(out[-1])):
             out = out[1:-1]
 
@@ -106,7 +106,7 @@ def correct(text: str, cfg: dict | None = None, glossary: list[str] | None = Non
     glossary = glossary if glossary is not None else load_glossary()
 
     if len(text) > cfg.get("max_chars", 4000):
-        raise CorrectionError("Selection too long — raise max_chars in config.json if intended.")
+        raise CorrectionError("Selection too long - raise max_chars in config.json if intended.")
 
     payload = {
         "model": cfg["model"],
@@ -128,7 +128,7 @@ def correct(text: str, cfg: dict | None = None, glossary: list[str] | None = Non
         resp.raise_for_status()
     except requests.RequestException as exc:
         raise CorrectionError(
-            f"Cannot reach the local server at {cfg['base_url']} — is LM Studio's "
+            f"Cannot reach the local server at {cfg['base_url']} - is LM Studio's "
             f"server (or Ollama) running, and is the model '{cfg['model']}' available? ({exc})"
         ) from exc
     elapsed = time.perf_counter() - start

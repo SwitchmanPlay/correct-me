@@ -1,11 +1,12 @@
-"""Hotkey Proofreader — MVP with stock Gemma 2 2B via LM Studio or Ollama.
+"""correct-me - MVP with stock Gemma 4 E2B via LM Studio or Ollama.
 
-Select text anywhere, press the hotkey (default Ctrl+Alt+G), and the selection
+Select text anywhere, press the hotkey (default: Insert), and the selection
 is replaced with a corrected version. Fully local, no cloud.
 
 Run:  python main.py
 """
 
+import argparse
 import sys
 import threading
 import time
@@ -93,8 +94,20 @@ def on_hotkey() -> None:
 
 
 def main() -> None:
-    hotkey = cfg.get("hotkey", "ctrl+alt+g")
-    print(f"Hotkey Proofreader — model: {cfg['model']} @ {cfg['base_url']}")
+    import sys
+    if sys.platform.startswith("win"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except AttributeError:
+            pass
+    parser = argparse.ArgumentParser(description="correct-me")
+    parser.add_argument(
+        "--hotkey",
+        help='override the hotkey from config.json, e.g. --hotkey "page up" or --hotkey f8',
+    )
+    args = parser.parse_args()
+    hotkey = args.hotkey or cfg.get("hotkey", "insert")
+    print(f"correct-me - model: {cfg['model']} @ {cfg['base_url']}")
     if cfg.get("warm_up_on_start", True):
         print("Warming up model ...")
         warm_up(cfg)

@@ -20,6 +20,12 @@ SAMPLES = [
 
 
 def main() -> None:
+    import sys
+    if sys.platform.startswith("win"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except AttributeError:
+            pass
     cfg = load_config()
     glossary = load_glossary()
     print(f"Model: {cfg['model']} @ {cfg['base_url']}\n")

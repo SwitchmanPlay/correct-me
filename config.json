@@ -1,7 +1,7 @@
 {
-  "model": "google/gemma-4-E2b-it",
-  "base_url": "http://localhost:1234/v1",
-  "hotkey": "ctrl+alt+g",
+  "model": "gemma-4-e2b:latest",
+  "base_url": "http://localhost:11434/v1",
+  "hotkey": "home",
   "temperature": 0,
   "max_chars": 4000,
   "timeout_seconds": 60,
