@@ -1,6 +1,6 @@
 """correct-me - MVP with stock Gemma 4 E2B via LM Studio or Ollama.
 
-Select text anywhere, press the hotkey (default: Insert), and the selection
+Select text anywhere, press the hotkey (default: Home), and the selection
 is replaced with a corrected version. Fully local, no cloud.
 
 Run:  python main.py
@@ -38,16 +38,26 @@ def beep(ok: bool = True) -> None:
 
 
 def grab_selection() -> tuple[str, str]:
-    """Copy the current selection. Returns (selection, previous_clipboard)."""
+    """Copy the current selection. Returns (selection, previous_clipboard).
+
+    Polls the clipboard instead of a fixed sleep, so it returns as soon as
+    the copy lands (usually 50-100 ms) instead of always waiting 250 ms.
+    """
     previous = ""
     try:
         previous = pyperclip.paste()
     except pyperclip.PyperclipException:
         pass
     pyperclip.copy("")  # so we can tell whether Ctrl+C actually copied anything
+    time.sleep(0.05)  # let the target app settle after the hotkey press
     keyboard.send("ctrl+c")
-    time.sleep(cfg.get("clipboard_delay", 0.25))
-    return pyperclip.paste(), previous
+    deadline = time.monotonic() + cfg.get("clipboard_timeout", 1.0)
+    while time.monotonic() < deadline:
+        text = pyperclip.paste()
+        if text:
+            return text, previous
+        time.sleep(0.03)
+    return "", previous
 
 
 def replace_selection(corrected: str, previous_clipboard: str) -> None:
@@ -63,10 +73,14 @@ def replace_selection(corrected: str, previous_clipboard: str) -> None:
 def on_hotkey() -> None:
     if not _busy.acquire(blocking=False):
         return  # a correction is already running
+    started = time.monotonic()
     try:
         text, previous = grab_selection()
         if not text.strip():
-            print("[skip] nothing selected")
+            print(
+                "[skip] nothing selected - if the target app runs as "
+                "administrator, run this script as administrator too"
+            )
             pyperclip.copy(previous)
             beep(ok=False)
             return
@@ -87,32 +101,34 @@ def on_hotkey() -> None:
             return
 
         replace_selection(corrected, previous)
-        print(f"done ({seconds:.1f}s)")
+        total = time.monotonic() - started
+        print(f"done (model {seconds:.1f}s, total {total:.1f}s)")
         beep(ok=True)
     finally:
         _busy.release()
 
 
 def main() -> None:
-    import sys
-    if sys.platform.startswith("win"):
-        try:
-            sys.stdout.reconfigure(encoding="utf-8")
-        except AttributeError:
-            pass
     parser = argparse.ArgumentParser(description="correct-me")
     parser.add_argument(
         "--hotkey",
         help='override the hotkey from config.json, e.g. --hotkey "page up" or --hotkey f8',
     )
     args = parser.parse_args()
-    hotkey = args.hotkey or cfg.get("hotkey", "insert")
+    hotkey = args.hotkey or cfg.get("hotkey", "home")
+    suppress = cfg.get("suppress_hotkey", True)
     print(f"correct-me - model: {cfg['model']} @ {cfg['base_url']}")
     if cfg.get("warm_up_on_start", True):
         print("Warming up model ...")
         warm_up(cfg)
-    # Run corrections off the keyboard-callback thread so hotkeys stay responsive.
-    keyboard.add_hotkey(hotkey, lambda: threading.Thread(target=on_hotkey, daemon=True).start())
+    # suppress=True swallows the key so it cannot reach the target app.
+    # Critical for keys like Home/End/Page Up, which would otherwise move the
+    # caret and destroy the selection before we can copy it.
+    keyboard.add_hotkey(
+        hotkey,
+        lambda: threading.Thread(target=on_hotkey, daemon=True).start(),
+        suppress=suppress,
+    )
     print(f"Ready. Select text anywhere and press {hotkey.upper()}. Ctrl+C here to quit.")
     try:
         keyboard.wait()

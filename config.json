@@ -1,11 +1,12 @@
 {
-  "model": "gemma-4-e2b:latest",
-  "base_url": "http://localhost:11434/v1",
+  "model": "google/gemma-4-e2b",
+  "base_url": "http://localhost:1234/v1",
   "hotkey": "home",
+  "suppress_hotkey": true,
   "temperature": 0,
   "max_chars": 4000,
   "timeout_seconds": 60,
-  "clipboard_delay": 0.25,
+  "clipboard_timeout": 1.0,
   "restore_clipboard": true,
   "warm_up_on_start": true
 }

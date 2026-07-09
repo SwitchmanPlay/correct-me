@@ -1,6 +1,6 @@
 # correct-me (MVP - stock Gemma 4 E2B)
 
-Select text in **any** app, press `Insert` (configurable), and the selection is replaced
+Select text in **any** app, press `Home` (configurable), and the selection is replaced
 with a grammar/spelling/punctuation-corrected version. Runs 100% locally -
 no cloud, no telemetry.
 
@@ -14,9 +14,10 @@ and **Ollama** work - pick one below.
 2. Go to the **Developer** tab -> start the server (default `http://localhost:1234`).
 3. Check the model identifier shown in the server/model list (e.g. `google/gemma-4-e2b`)
    and make sure `model` in `config.json` matches it.
-4. Tip: enable **just-in-time model loading** in the server settings so the model
-   loads on first request and auto-unloads when idle - you don't need to keep it
-   loaded manually.
+4. RAM vs speed trade-off: **just-in-time model loading** (server settings)
+   saves RAM but adds seconds to the first correction after idle, because the
+   model has to reload from disk. For fast corrections, keep the model loaded
+   or raise the JIT idle TTL. See "Speed" below.
 
 ## Option B - Ollama
 
@@ -42,7 +43,7 @@ python test_model.py    # sanity-check the model + prompt first (no clipboard)
 python main.py          # the actual hotkey app
 ```
 
-Select some text anywhere (browser, Telegram, VS Code...), press **Insert**.
+Select some text anywhere (browser, Telegram, VS Code...), press **Home**.
 One high beep = done. Two low beeps = nothing selected / error (see console).
 
 ## How it works
@@ -68,9 +69,10 @@ hotkey -> simulated Ctrl+C -> prompt + glossary -> local server (Gemma 4 E2B, te
 | --- | --- | --- |
 | `model` | `google/gemma-4-e2b` | Model id (LM Studio) or tag (Ollama, e.g. `gemma4:e2b`) |
 | `base_url` | `http://localhost:1234/v1` | LM Studio; use `http://localhost:11434/v1` for Ollama |
-| `hotkey` | `insert` | Global hotkey - see "Changing the hotkey" below |
+| `hotkey` | `home` | Global hotkey - see "Changing the hotkey" below |
+| `suppress_hotkey` | `true` | Swallow the key so it never reaches the app (required for Home/End/Page Up) |
 | `max_chars` | `4000` | Refuse selections longer than this |
-| `clipboard_delay` | `0.25` | Seconds to wait after Ctrl+C (raise if selections come back empty) |
+| `clipboard_timeout` | `1.0` | Max seconds to wait for the copy to land (polled every 30 ms) |
 | `restore_clipboard` | `true` | Put your old clipboard back after pasting |
 
 ## Changing the hotkey
@@ -83,12 +85,65 @@ Two ways:
 Anything the Python [`keyboard`](https://github.com/boppreh/keyboard) library
 understands works. Good low-conflict choices:
 
-- Single keys: `insert` (default), `page up`, `pause`, `scroll lock`, `f8`, `f9`
+- Single keys: `home` (default), `insert`, `page up`, `pause`, `scroll lock`, `f8`, `f9`
 - Combos: `ctrl+alt+g`, `ctrl+shift+space`
 
-Note: the app does not block the key's normal function - e.g. Insert still
-toggles overwrite mode in some editors, Page Up still scrolls. If that ever
-bothers you in a specific app, switch to an F-key or a combo.
+Note: since v3 the hotkey is **suppressed** - the app swallows the key, so it
+no longer performs its normal action anywhere (Home won't move the cursor
+while correct-me is running). This is required: keys like Home/End/Page Up
+move the caret and collapse the text selection before the app can copy it -
+exactly why v2 always reported "nothing selected". If you use a combo like
+`ctrl+alt+g` and want the key back, set `"suppress_hotkey": false`.
+
+## Speed
+
+What the 4-5 s per correction was made of, and what to do:
+
+- **Model reload (biggest chunk)**: with JIT loading / auto-unload, the first
+  correction after idle reloads the model from disk - several seconds. Keep
+  the model loaded (or raise the idle TTL) and this disappears.
+- **CPU instead of GPU**: check LM Studio shows full GPU offload for the
+  model. CPU-only is a 5-10x slowdown - on your 4060 Ti there is no reason
+  for it.
+- **Fixed clipboard sleep**: v3 polls the clipboard every 30 ms instead of
+  sleeping 250 ms, cutting ~0.2-0.3 s of fixed overhead.
+- **Generation itself**: the model re-types the whole selection, so latency
+  scales with text length. Warm model + GPU offload: roughly 0.5-1 s for a
+  short sentence, 2-4 s for a long paragraph.
+
+Honest answer on "half a second": realistic for short sentences with a warm
+model on GPU; not realistic for whole paragraphs - no consumer-hardware local
+model re-types 200+ tokens in 0.5 s. The Phase-2 trick if this matters:
+split long text into sentences and correct them in parallel requests.
+
+## Model size
+
+The default LM Studio `google/gemma-4-e2b` download is ~4.2 GB. Smaller
+variants of the *same* model:
+
+- **LM Studio**: download a **Q4_K_M GGUF** instead - search
+  `gemma-4-E2B-it-GGUF` (from `lmstudio-community` or `unsloth`), ~3.2 GB.
+- **Ollama**: `ollama pull batiai/gemma4-e2b:q4` - 3.4 GB.
+- Google's **QAT** variants are trained for 4-bit and hold quality better
+  than plain Q4 quants of the same size.
+
+Don't go below Q4 (Q2/Q3) - correction quality visibly degrades. And there is
+no better *smaller* model for multilingual correction right now: Gemma 4 E2B
+is already the floor of its class, so shrink the quant, not the model.
+
+## Troubleshooting
+
+- **"nothing selected" everywhere (the v2 bug)**: fixed in v3. Home/End/Page
+  Up move the caret and destroy the selection before Ctrl+C fires; v3
+  suppresses the hotkey so the selection survives.
+- **Still "nothing selected" in one specific app**: that app probably runs
+  elevated (as administrator); Windows blocks keystroke injection into
+  elevated windows. Run the script as administrator too. Otherwise admin is
+  NOT needed.
+- **Pastes nothing or stale text**: a clipboard manager may interfere - try
+  disabling it, or raise `clipboard_timeout`.
+- **Two beeps + `[error]` in console**: server not running or wrong `model`
+  id; the console message says which.
 
 ## Known limitations (MVP)
 
