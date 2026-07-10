@@ -1,8 +1,9 @@
 # correct-me (MVP - stock Gemma 4 E2B)
 
-Select text in **any** app, press `Home` (configurable), and the selection is replaced
-with a grammar/spelling/punctuation-corrected version. Runs 100% locally -
-no cloud, no telemetry.
+Press `Home` (configurable) in any text field and the text is replaced with a
+grammar/spelling/punctuation-corrected version. **No selection needed**: with
+nothing selected, the whole input field is corrected - type your chat
+message, press Home, hit send. Runs 100% locally - no cloud, no telemetry.
 
 This is Phase 1 (MVP) of the build plan: stock model, no fine-tuning yet.
 The app talks to any **OpenAI-compatible local server**, so both **LM Studio**
@@ -10,10 +11,13 @@ and **Ollama** work - pick one below.
 
 ## Option A - LM Studio (default config)
 
-1. In LM Studio, download **Gemma 4 E2B** (search `gemma-4-e2b`).
+1. In LM Studio, download **`google/gemma-4-e2b`** (the standard ~4.2 GB
+   build - it is already a 4-bit quant). Want it smaller? Get
+   **`google/gemma-4-e2b-qat`** instead: Google's official QAT build,
+   trained specifically for 4-bit, smaller and closest to full quality.
 2. Go to the **Developer** tab -> start the server (default `http://localhost:1234`).
 3. Check the model identifier shown in the server/model list (e.g. `google/gemma-4-e2b`)
-   and make sure `model` in `config.json` matches it.
+   and make sure `model` in `config.json` matches it exactly.
 4. RAM vs speed trade-off: **just-in-time model loading** (server settings)
    saves RAM but adds seconds to the first correction after idle, because the
    model has to reload from disk. For fast corrections, keep the model loaded
@@ -43,13 +47,16 @@ python test_model.py    # sanity-check the model + prompt first (no clipboard)
 python main.py          # the actual hotkey app
 ```
 
-Select some text anywhere (browser, Telegram, VS Code...), press **Home**.
-One high beep = done. Two low beeps = nothing selected / error (see console).
+Type a message anywhere (browser, Telegram, VS Code...) and just press
+**Home** - no selecting needed; the app grabs the whole input field (Ctrl+A).
+Select text first only when you want to correct part of it.
+One high beep = done. Two low beeps = no text / error (see console).
 
 ## How it works
 
 ```
-hotkey -> simulated Ctrl+C -> prompt + glossary -> local server (Gemma 4 E2B, temp 0)
+hotkey -> Ctrl+C (Ctrl+A first if nothing selected) -> prompt + glossary
+       -> local server (Gemma 4 E2B, temp 0, thinking disabled)
        -> output cleaning -> guard rails -> simulated Ctrl+V -> clipboard restored
 ```
 
@@ -59,7 +66,7 @@ hotkey -> simulated Ctrl+C -> prompt + glossary -> local server (Gemma 4 E2B, te
   in the text, adding sentences, or rewriting instead of correcting.
 - **Glossary** (`glossary.json`): words the model must never "correct" - slang,
   names, project terms. Edit it freely; it is injected into the system prompt.
-- **RAM**: Gemma 4 E2B (Q4) is ~3.2 GB on disk (5.1B total params, 2.3B effective),
+- **RAM**: Gemma 4 E2B (Q4) is ~4 GB on disk (5.1B total params, 2.3B effective),
   loaded only while in use (see the
   auto-unload notes above).
 
@@ -71,6 +78,8 @@ hotkey -> simulated Ctrl+C -> prompt + glossary -> local server (Gemma 4 E2B, te
 | `base_url` | `http://localhost:1234/v1` | LM Studio; use `http://localhost:11434/v1` for Ollama |
 | `hotkey` | `home` | Global hotkey - see "Changing the hotkey" below |
 | `suppress_hotkey` | `true` | Swallow the key so it never reaches the app (required for Home/End/Page Up) |
+| `no_selection` | `select_all` | With no selection, grab the whole field via Ctrl+A (`off` to disable) |
+| `disable_thinking` | `true` | Suppress Gemma 4's hidden reasoning tokens (big latency win) |
 | `max_chars` | `4000` | Refuse selections longer than this |
 | `clipboard_timeout` | `1.0` | Max seconds to wait for the copy to land (polled every 30 ms) |
 | `restore_clipboard` | `true` | Put your old clipboard back after pasting |
@@ -99,6 +108,11 @@ exactly why v2 always reported "nothing selected". If you use a combo like
 
 What the 4-5 s per correction was made of, and what to do:
 
+- **Hidden thinking tokens**: Gemma 4 is a hybrid-thinking model and can
+  silently "reason" for hundreds of tokens before answering (646 in one
+  logged request!). v4 disables this per-request via `disable_thinking`.
+  If your server still shows `reasoning_content` in its logs, turn off
+  thinking/reasoning for the model in the server UI as well.
 - **Model reload (biggest chunk)**: with JIT loading / auto-unload, the first
   correction after idle reloads the model from disk - several seconds. Keep
   the model loaded (or raise the idle TTL) and this disappears.
@@ -116,16 +130,30 @@ model on GPU; not realistic for whole paragraphs - no consumer-hardware local
 model re-types 200+ tokens in 0.5 s. The Phase-2 trick if this matters:
 split long text into sentences and correct them in parallel requests.
 
+About caching the instructions: this already happens automatically. llama.cpp
+(the engine inside both LM Studio and Ollama) reuses the KV cache for a shared
+prompt prefix, and our system prompt is byte-identical on every request - so
+it is processed once per model load, not on every correction. The instructions
+can grow much bigger without adding per-request latency.
+
 ## Model size
 
-The default LM Studio `google/gemma-4-e2b` download is ~4.2 GB. Smaller
-variants of the *same* model:
+The default `google/gemma-4-e2b` LM Studio download (~4.2 GB) is already a
+4-bit quant - that is as small as this model officially gets in a normal GGUF.
+The options, all the *same* model:
 
-- **LM Studio**: download a **Q4_K_M GGUF** instead - search
-  `gemma-4-E2B-it-GGUF` (from `lmstudio-community` or `unsloth`), ~3.2 GB.
-- **Ollama**: `ollama pull batiai/gemma4-e2b:q4` - 3.4 GB.
-- Google's **QAT** variants are trained for 4-bit and hold quality better
-  than plain Q4 quants of the same size.
+- **LM Studio (default)**: `google/gemma-4-e2b`, ~4.2 GB. Works as-is.
+- **Smaller official option**: `google/gemma-4-e2b-qat` - Google's
+  Quantization-Aware Training build. QAT is *trained* for 4-bit, so it keeps
+  quality closest to the full bf16 model at the smallest size. If you want to
+  save disk/RAM, this is the one to pick, not a random small GGUF.
+- **Ollama**: `ollama run gemma4:e2b-it-q4_K_M`.
+- Avoid third-party "uncensored" or otherwise fine-tuned community GGUFs
+  (e.g. 3.4 GB Q4_K_M re-uploads): they are unofficial fine-tunes and often
+  follow instructions worse, which matters a lot for a corrector.
+- "MTP" builds are **drafter models** for multi-token prediction
+  (speculative decoding) - they assist a main model, they are not meant to be
+  loaded as your model.
 
 Don't go below Q4 (Q2/Q3) - correction quality visibly degrades. And there is
 no better *smaller* model for multilingual correction right now: Gemma 4 E2B
@@ -140,10 +168,25 @@ is already the floor of its class, so shrink the quant, not the model.
   elevated (as administrator); Windows blocks keystroke injection into
   elevated windows. Run the script as administrator too. Otherwise admin is
   NOT needed.
+- **Pressed Home outside a text field**: Ctrl+A may select a whole page;
+  anything over `max_chars` is refused, so nothing happens - by design.
 - **Pastes nothing or stale text**: a clipboard manager may interfere - try
   disabling it, or raise `clipboard_timeout`.
 - **Two beeps + `[error]` in console**: server not running or wrong `model`
   id; the console message says which.
+
+## Building a .exe
+
+```
+pip install pyinstaller
+pyinstaller --onefile --name correct-me main.py
+```
+
+`dist/correct-me.exe` is a single file you can drop into autostart. Keep
+`config.json` and `glossary.json` next to the .exe (the app looks for them
+there when frozen). Don't use `--noconsole` yet - the console is currently
+the only place errors are shown; a tray-icon GUI replaces it in the next
+phase.
 
 ## Known limitations (MVP)
 

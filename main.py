@@ -1,7 +1,9 @@
 """correct-me - MVP with stock Gemma 4 E2B via LM Studio or Ollama.
 
-Select text anywhere, press the hotkey (default: Home), and the selection
-is replaced with a corrected version. Fully local, no cloud.
+Press the hotkey (default: Home) in any text field. If text is selected, it
+is corrected and replaced. If nothing is selected, the whole field is grabbed
+via Ctrl+A and corrected - perfect for chat messages: type, press Home, send.
+Fully local, no cloud.
 
 Run:  python main.py
 """
@@ -37,27 +39,38 @@ def beep(ok: bool = True) -> None:
         winsound.Beep(400, 120)
 
 
-def grab_selection() -> tuple[str, str]:
-    """Copy the current selection. Returns (selection, previous_clipboard).
+def _copy_selection() -> str:
+    """Send Ctrl+C and poll the clipboard until the copy lands (or timeout)."""
+    pyperclip.copy("")  # so we can tell whether Ctrl+C actually copied anything
+    time.sleep(0.05)
+    keyboard.send("ctrl+c")
+    deadline = time.monotonic() + cfg.get("clipboard_timeout", 1.0)
+    while time.monotonic() < deadline:
+        text = pyperclip.paste()
+        if text:
+            return text
+        time.sleep(0.03)
+    return ""
 
-    Polls the clipboard instead of a fixed sleep, so it returns as soon as
-    the copy lands (usually 50-100 ms) instead of always waiting 250 ms.
+
+def grab_selection() -> tuple[str, str, bool]:
+    """Copy the selection; with no selection, select the whole field (Ctrl+A).
+
+    Returns (text, previous_clipboard, used_select_all).
     """
     previous = ""
     try:
         previous = pyperclip.paste()
     except pyperclip.PyperclipException:
         pass
-    pyperclip.copy("")  # so we can tell whether Ctrl+C actually copied anything
-    time.sleep(0.05)  # let the target app settle after the hotkey press
-    keyboard.send("ctrl+c")
-    deadline = time.monotonic() + cfg.get("clipboard_timeout", 1.0)
-    while time.monotonic() < deadline:
-        text = pyperclip.paste()
-        if text:
-            return text, previous
-        time.sleep(0.03)
-    return "", previous
+    text = _copy_selection()
+    if text:
+        return text, previous, False
+    if cfg.get("no_selection", "select_all") != "select_all":
+        return "", previous, False
+    keyboard.send("ctrl+a")
+    time.sleep(0.05)
+    return _copy_selection(), previous, True
 
 
 def replace_selection(corrected: str, previous_clipboard: str) -> None:
@@ -70,16 +83,21 @@ def replace_selection(corrected: str, previous_clipboard: str) -> None:
         pyperclip.copy(previous_clipboard)
 
 
+def _deselect() -> None:
+    """Collapse a Ctrl+A selection so the next keystroke can't wipe the text."""
+    keyboard.send("right")
+
+
 def on_hotkey() -> None:
     if not _busy.acquire(blocking=False):
         return  # a correction is already running
     started = time.monotonic()
     try:
-        text, previous = grab_selection()
+        text, previous, used_select_all = grab_selection()
         if not text.strip():
             print(
-                "[skip] nothing selected - if the target app runs as "
-                "administrator, run this script as administrator too"
+                "[skip] no text found - empty field? (If the target app runs "
+                "as administrator, run this script as administrator too.)"
             )
             pyperclip.copy(previous)
             beep(ok=False)
@@ -90,12 +108,16 @@ def on_hotkey() -> None:
             corrected, seconds = correct(text, cfg, glossary)
         except CorrectionError as exc:
             print(f"\n[error] {exc}")
+            if used_select_all:
+                _deselect()
             pyperclip.copy(previous)
             beep(ok=False)
             return
 
         if corrected == text:
             print(f"nothing to fix ({seconds:.1f}s)")
+            if used_select_all:
+                _deselect()
             pyperclip.copy(previous)
             beep(ok=True)
             return
@@ -129,7 +151,7 @@ def main() -> None:
         lambda: threading.Thread(target=on_hotkey, daemon=True).start(),
         suppress=suppress,
     )
-    print(f"Ready. Select text anywhere and press {hotkey.upper()}. Ctrl+C here to quit.")
+    print(f"Ready. Press {hotkey.upper()} in a text field (selection optional). Ctrl+C here to quit.")
     try:
         keyboard.wait()
     except KeyboardInterrupt:

@@ -3,6 +3,8 @@
   "base_url": "http://localhost:1234/v1",
   "hotkey": "home",
   "suppress_hotkey": true,
+  "no_selection": "select_all",
+  "disable_thinking": true,
   "temperature": 0,
   "max_chars": 4000,
   "timeout_seconds": 60,

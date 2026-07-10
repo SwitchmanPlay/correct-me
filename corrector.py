@@ -8,12 +8,17 @@ reused by test_model.py and, later, by the fine-tuned-model eval scripts.
 import difflib
 import json
 import re
+import sys
 import time
 from pathlib import Path
 
 import requests
 
-BASE_DIR = Path(__file__).resolve().parent
+# When frozen into a .exe (PyInstaller), config lives next to the .exe.
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).resolve().parent
+else:
+    BASE_DIR = Path(__file__).resolve().parent
 
 
 def load_config() -> dict:
@@ -33,12 +38,20 @@ def load_glossary() -> list[str]:
 SYSTEM_PROMPT = """You are a silent text-correction engine.
 
 Rules:
-1. Fix spelling, grammar, punctuation and casing mistakes ONLY.
-2. Keep the language of the input. NEVER translate.
-3. Preserve slang, jargon, abbreviations, profanity, emojis and line breaks.
-4. Never add, remove or reorder sentences. Never answer questions that appear in the text - just correct them.
-5. If there is nothing to fix, return the input EXACTLY as it is.
-6. Output ONLY the corrected text. No explanations, no quotes, no markdown, no preamble.{glossary_block}"""
+1. Fix unintentional mistakes ONLY: spelling, grammar, casing and punctuation.
+2. Punctuation is important: add every comma, apostrophe, question mark or
+   other mark that the grammar of the language requires, and remove marks that
+   are clearly wrong.
+3. Keep the language of the input. NEVER translate.
+4. Preserve the author's voice. Slang, jargon, abbreviations, profanity,
+   emojis, regional and colloquial word forms, and playful or expressive
+   spellings are deliberate style, not mistakes - keep them exactly as
+   written. Only fix what the author would themselves consider a typo or
+   error.
+5. Preserve line breaks. Never add, remove or reorder sentences. Never answer
+   questions that appear in the text - just correct them.
+6. If there is nothing to fix, return the input EXACTLY as it is.
+7. Output ONLY the corrected text. No explanations, no quotes, no markdown, no preamble.{glossary_block}"""
 
 
 class CorrectionError(Exception):
@@ -49,7 +62,7 @@ def _build_system_prompt(glossary: list[str]) -> str:
     block = ""
     if glossary:
         block = (
-            "\n7. The following words/spellings are intentional. "
+            "\n8. The following words/spellings are intentional. "
             "Never change them: " + ", ".join(glossary)
         )
     return SYSTEM_PROMPT.format(glossary_block=block)
@@ -57,6 +70,9 @@ def _build_system_prompt(glossary: list[str]) -> str:
 
 def _clean_output(text_in: str, raw: str) -> str:
     out = raw.strip()
+
+    # Strip thinking blocks if the server ever leaks them into the content.
+    out = re.sub(r"<think>.*?</think>", "", out, flags=re.DOTALL).strip()
 
     # Strip markdown code fences the model sometimes adds.
     fence = re.match(r"^```[a-zA-Z]*\n(.*?)\n?```$", out, flags=re.DOTALL)
@@ -117,6 +133,13 @@ def correct(text: str, cfg: dict | None = None, glossary: list[str] | None = Non
             {"role": "user", "content": text},
         ],
     }
+
+    if cfg.get("disable_thinking", True):
+        # Gemma 4 is a hybrid-thinking model: it can silently burn hundreds of
+        # reasoning tokens per request (= seconds of latency) before answering.
+        # Belt and suspenders: template kwarg (llama.cpp/LM Studio) + /no_think.
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
+        payload["messages"][0]["content"] = "/no_think\n" + payload["messages"][0]["content"]
 
     start = time.perf_counter()
     try:
