@@ -8,7 +8,10 @@
   "temperature": 0,
   "max_chars": 4000,
   "timeout_seconds": 60,
+  "selection_probe_timeout": 0.15,
   "clipboard_timeout": 1.0,
+  "paste_delay": 0.05,
+  "restore_delay": 0.2,
   "restore_clipboard": true,
   "warm_up_on_start": true
 }

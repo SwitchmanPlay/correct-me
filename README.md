@@ -5,6 +5,9 @@ grammar/spelling/punctuation-corrected version. **No selection needed**: with
 nothing selected, the whole input field is corrected - type your chat
 message, press Home, hit send. Runs 100% locally - no cloud, no telemetry.
 
+Since v5 it lives in the **system tray**: a status icon plus a settings window
+(model picker, hotkey, toggles) - no console window needed.
+
 This is Phase 1 (MVP) of the build plan: stock model, no fine-tuning yet.
 The app talks to any **OpenAI-compatible local server**, so both **LM Studio**
 and **Ollama** work - pick one below.
@@ -44,13 +47,20 @@ the LM Studio window open annoys you. Not worth switching for any other reason.
 ```
 pip install -r requirements.txt
 python test_model.py    # sanity-check the model + prompt first (no clipboard)
-python main.py          # the actual hotkey app
+python main.py           # the actual hotkey app (tray icon)
+python main.py --console # old v4-style console mode
 ```
 
 Type a message anywhere (browser, Telegram, VS Code...) and just press
 **Home** - no selecting needed; the app grabs the whole input field (Ctrl+A).
 Select text first only when you want to correct part of it.
-One high beep = done. Two low beeps = no text / error (see console).
+One high beep = done. Two low beeps = no text / error.
+
+The **tray icon** shows status: green = ready, orange = correcting, red =
+error (hover it for details, like timings). Right-click it for **Settings**
+(server URL, model picker with a live list from the server, hotkey, toggles),
+**Pause** and **Quit**; double-click opens Settings directly. Saved settings
+are written to `config.json` and applied instantly - no restart.
 
 ## How it works
 
@@ -81,13 +91,17 @@ hotkey -> Ctrl+C (Ctrl+A first if nothing selected) -> prompt + glossary
 | `no_selection` | `select_all` | With no selection, grab the whole field via Ctrl+A (`off` to disable) |
 | `disable_thinking` | `true` | Suppress Gemma 4's hidden reasoning tokens (big latency win) |
 | `max_chars` | `4000` | Refuse selections longer than this |
-| `clipboard_timeout` | `1.0` | Max seconds to wait for the copy to land (polled every 30 ms) |
+| `selection_probe_timeout` | `0.15` | How long to wait for a selection copy before falling back to Ctrl+A |
+| `clipboard_timeout` | `1.0` | Max seconds to wait for the Ctrl+A copy to land (polled every 20 ms) |
+| `paste_delay` | `0.05` | Pause between setting the clipboard and sending Ctrl+V |
+| `restore_delay` | `0.2` | Pause after Ctrl+V before the old clipboard is restored (in background) |
 | `restore_clipboard` | `true` | Put your old clipboard back after pasting |
 
 ## Changing the hotkey
 
-Two ways:
+Three ways:
 
+- Easiest: right-click the tray icon -> **Settings**.
 - Permanent: edit `"hotkey"` in `config.json`.
 - One-off: `python main.py --hotkey "page up"`
 
@@ -119,11 +133,19 @@ What the 4-5 s per correction was made of, and what to do:
 - **CPU instead of GPU**: check LM Studio shows full GPU offload for the
   model. CPU-only is a 5-10x slowdown - on your 4060 Ti there is no reason
   for it.
-- **Fixed clipboard sleep**: v3 polls the clipboard every 30 ms instead of
-  sleeping 250 ms, cutting ~0.2-0.3 s of fixed overhead.
+- **Fixed overhead (v5)**: pressing the hotkey with *nothing selected* used
+  to burn the full 1.0 s `clipboard_timeout` before falling back to Ctrl+A -
+  a 1-second tax on the main use case. v5 probes the selection for only
+  `selection_probe_timeout` (0.15 s), trims the paste sleeps, and restores
+  the clipboard in the background. Total is now roughly model time + ~0.4 s.
 - **Generation itself**: the model re-types the whole selection, so latency
   scales with text length. Warm model + GPU offload: roughly 0.5-1 s for a
   short sentence, 2-4 s for a long paragraph.
+- **Speculative decoding (best model-time win)**: in LM Studio, open the
+  model's load settings and attach the Gemma 4 E2B **MTP drafter** as the
+  draft model. Correction output is highly predictable (mostly the input
+  re-typed), which is the ideal case for it - typically 1.5-2.5x faster
+  generation.
 
 Honest answer on "half a second": realistic for short sentences with a warm
 model on GPU; not realistic for whole paragraphs - no consumer-hardware local
@@ -179,14 +201,13 @@ is already the floor of its class, so shrink the quant, not the model.
 
 ```
 pip install pyinstaller
-pyinstaller --onefile --name correct-me main.py
+pyinstaller --onefile --noconsole --name correct-me main.py
 ```
 
 `dist/correct-me.exe` is a single file you can drop into autostart. Keep
 `config.json` and `glossary.json` next to the .exe (the app looks for them
-there when frozen). Don't use `--noconsole` yet - the console is currently
-the only place errors are shown; a tray-icon GUI replaces it in the next
-phase.
+there when frozen). `--noconsole` is fine since v5: status and errors are
+shown on the tray icon (hover it), and problems still beep twice.
 
 ## Known limitations (MVP)
 
@@ -194,7 +215,6 @@ phase.
   `keyboard` needs root on Linux, and macOS needs accessibility permissions
   (and Cmd instead of Ctrl) - not wired up yet.
 - Apps that block programmatic paste (some terminals, password fields) won't work.
-- No tray icon yet - it's a console app by design (Handy-style minimalism).
 - Glossary is static; "learn words the user keeps re-sending" is Phase 5.
 
 ## Roadmap
