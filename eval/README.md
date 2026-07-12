@@ -62,3 +62,10 @@ miss with input/expected/got). Send both files back for analysis.
 - The style-restore guard in corrector.py now deterministically reverts
   stretched-letter collapses and e/yo swaps, so those failure classes should
   disappear regardless of what the model outputs.
+
+## v7.3
+
+- Protected vocabulary: replace-type model edits to words from the owner
+  corpus vocabulary are reverted word-by-word in corrector.py
+  (`protect_vocab` in config.json). Expect must_not_change false changes and
+  uk->ru drift in the layout bucket to drop further.

@@ -6,6 +6,7 @@
   "suppress_hotkey": true,
   "disable_thinking": true,
   "fix_layout": true,
+  "protect_vocab": true,
   "keep_alive_minutes": 0,
   "temperature": 0,
   "max_chars": 4000,

@@ -38,6 +38,7 @@ DEFAULT_CONFIG = {
     "suppress_hotkey": True,
     "disable_thinking": True,
     "fix_layout": True,
+    "protect_vocab": True,
     "keep_alive_minutes": 0,
     "temperature": 0,
     "max_chars": 4000,
@@ -156,46 +157,79 @@ def _passes_guards(text_in: str, out: str) -> bool:
     return similarity >= 0.5
 
 _STRETCH = re.compile(r"([^\W\d_])\1{2,}")
+_REPEAT = re.compile(r"([^\W\d_])\1+")
 _EDGE_PUNCT = re.compile(r"^[\W_]+|[\W_]+$")
+
+# The owner's own frequent words (from layout.py, generated from their
+# Telegram corpus). The model is never allowed to replace these: slang like
+# "patamushta" or Ukrainian words the model likes to russify are protected.
+_PROTECTED_VOCAB = layout._VOCAB_RU | layout._VOCAB_UK
+
+
+def _core(w: str) -> str:
+    return _EDGE_PUNCT.sub("", w)
 
 
 def _norm_token(w: str) -> str:
-    core = _EDGE_PUNCT.sub("", w).lower()
-    return _STRETCH.sub(r"\1", core).replace("\u0451", "\u0435")
+    core = _core(w).lower()
+    return _REPEAT.sub(r"\1", core).replace("\u0451", "\u0435")
 
 
-def _restore_style(original: str, corrected: str) -> str:
-    """Undo pure style edits the model sometimes makes despite the prompt:
-    collapsing intentionally stretched letters (kristinkaaaa) and swapping
-    e/yo spelling. Works word by word, so real fixes (commas, typos) in the
-    same message survive. Validated on the owner eval set: recovers style
-    cases with zero regressions on genuine corrections."""
+def _restore_style(
+    original: str,
+    corrected: str,
+    protect_vocab: bool = True,
+    glossary: list[str] | None = None,
+) -> str:
+    """Undo pure style edits the model sometimes makes despite the prompt.
+
+    Word-level, so real fixes (commas, typos) in the same message survive:
+    - stretched letters are restored exactly (kristinkaaaa stays stretched,
+      even if the model only shortened the stretch)
+    - e/yo respelling is reverted to the author's own choice
+    - words from the owner's own frequent vocabulary are never replaced
+      (stops slang "fixes" and uk->ru drift)
+    Validated against the owner eval set: recovers style cases with zero
+    regressions on genuine corrections."""
     if "\n" in original or "\n" in corrected:
         return corrected  # word alignment would destroy line breaks
+    protected_words = _PROTECTED_VOCAB
+    if glossary:
+        protected_words = protected_words | {g.lower() for g in glossary}
     ow, cw = original.split(), corrected.split()
     matcher = difflib.SequenceMatcher(
         None, [_norm_token(w) for w in ow], [_norm_token(w) for w in cw]
     )
     out = []
     for op, a1, a2, b1, b2 in matcher.get_opcodes():
-        if op != "equal":
-            out.extend(cw[b1:b2])
-            continue
-        for orig_w, corr_w in zip(ow[a1:a2], cw[b1:b2]):
-            oc = _EDGE_PUNCT.sub("", orig_w)
-            cc = _EDGE_PUNCT.sub("", corr_w)
-            stretch_undone = bool(_STRETCH.search(oc)) and not _STRETCH.search(cc)
-            yo_swapped = (
-                oc.lower().replace("\u0451", "\u0435")
-                == cc.lower().replace("\u0451", "\u0435")
-                and oc.lower() != cc.lower()
+        if op == "equal":
+            for orig_w, corr_w in zip(ow[a1:a2], cw[b1:b2]):
+                oc, cc = _core(orig_w), _core(corr_w)
+                stretch_undone = bool(_STRETCH.search(oc)) and oc != cc
+                yo_swapped = (
+                    oc.lower().replace("\u0451", "\u0435")
+                    == cc.lower().replace("\u0451", "\u0435")
+                    and oc.lower() != cc.lower()
+                )
+                if oc and (stretch_undone or yo_swapped):
+                    lead = re.match(r"^[\W_]*", corr_w).group(0)
+                    trail = re.search(r"[\W_]*$", corr_w).group(0)
+                    out.append(lead + oc + trail)
+                else:
+                    out.append(corr_w)
+        elif op == "replace" and protect_vocab:
+            ocores = [_core(w) for w in ow[a1:a2]]
+            protected = (
+                0 < len(ocores) <= 3
+                and (b2 - b1) <= (a2 - a1) + 2
+                and all(len(c) >= 2 and c.lower() in protected_words for c in ocores)
             )
-            if oc and (stretch_undone or yo_swapped):
-                lead = re.match(r"^[\W_]*", corr_w).group(0)
-                trail = re.search(r"[\W_]*$", corr_w).group(0)
-                out.append(lead + oc + trail)
+            if protected:
+                out.extend(ow[a1:a2])
             else:
-                out.append(corr_w)
+                out.extend(cw[b1:b2])
+        else:
+            out.extend(cw[b1:b2])
     return " ".join(out)
 
 
@@ -281,7 +315,7 @@ def correct(text: str, cfg: dict | None = None, glossary: list[str] | None = Non
         )
 
     out = _clean_output(text, raw)
-    out = _restore_style(text, out)
+    out = _restore_style(text, out, cfg.get("protect_vocab", True), glossary)
 
     # Preserve the exact leading/trailing whitespace of the selection.
     lead = text[: len(text) - len(text.lstrip())]
