@@ -137,9 +137,10 @@ def correct(text: str, cfg: dict | None = None, glossary: list[str] | None = Non
     if cfg.get("disable_thinking", True):
         # Gemma 4 is a hybrid-thinking model: it can silently burn hundreds of
         # reasoning tokens per request (= seconds of latency) before answering.
-        # Belt and suspenders: template kwarg (llama.cpp/LM Studio) + /no_think.
+        # Honored by llama.cpp server and Ollama; LM Studio currently IGNORES
+        # this field - there thinking must be disabled in the model's own
+        # settings (see README -> Troubleshooting). We detect and warn below.
         payload["chat_template_kwargs"] = {"enable_thinking": False}
-        payload["messages"][0]["content"] = "/no_think\n" + payload["messages"][0]["content"]
 
     start = time.perf_counter()
     try:
@@ -157,9 +158,22 @@ def correct(text: str, cfg: dict | None = None, glossary: list[str] | None = Non
     elapsed = time.perf_counter() - start
 
     try:
-        raw = resp.json()["choices"][0]["message"]["content"]
+        data = resp.json()
+        raw = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, ValueError) as exc:
         raise CorrectionError(f"Unexpected response from the server: {exc}") from exc
+
+    if cfg.get("disable_thinking", True):
+        try:
+            thought = data["usage"]["completion_tokens_details"]["reasoning_tokens"]
+        except (KeyError, TypeError):
+            thought = 0
+        if thought:
+            print(
+                f"\n[warn] the server spent {thought} hidden thinking tokens. LM Studio "
+                "ignores the API's thinking-off flag - disable thinking in the model's "
+                "own settings (README -> Troubleshooting) to make corrections fast."
+            )
 
     out = _clean_output(text, raw)
 

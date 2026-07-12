@@ -124,9 +124,11 @@ What the 4-5 s per correction was made of, and what to do:
 
 - **Hidden thinking tokens**: Gemma 4 is a hybrid-thinking model and can
   silently "reason" for hundreds of tokens before answering (646 in one
-  logged request!). v4 disables this per-request via `disable_thinking`.
-  If your server still shows `reasoning_content` in its logs, turn off
-  thinking/reasoning for the model in the server UI as well.
+  logged request!). The app requests thinking off (`disable_thinking`), but
+  **LM Studio currently ignores that API field**, and its in-app toggle
+  resets whenever the model reloads. Permanent fix: see Troubleshooting ->
+  "Thinking turns itself back on". The app now prints a warning whenever
+  the server thought anyway.
 - **Model reload (biggest chunk)**: with JIT loading / auto-unload, the first
   correction after idle reloads the model from disk - several seconds. Keep
   the model loaded (or raise the idle TTL) and this disappears.
@@ -196,6 +198,20 @@ is already the floor of its class, so shrink the quant, not the model.
   disabling it, or raise `clipboard_timeout`.
 - **Two beeps + `[error]` in console**: server not running or wrong `model`
   id; the console message says which.
+- **Thinking turns itself back on (slow again after a restart)**: LM
+  Studio's "Enable Thinking" toggle is per-load and resets when the model
+  reloads, and the API cannot override it. Permanent fix: **My Models ->
+  the Gemma model -> Inference -> Prompt Template (Jinja) -> add
+  `{%- set enable_thinking = false %}` as the FIRST line -> reload**. Then
+  it stays off no matter how or when the model gets loaded.
+- **Pressing the hotkey in an empty field pasted old clipboard text (v5
+  bug)**: fixed in v5.1. Clearing the clipboard with an empty string is
+  unreliable on Windows, so v5 could mistake your previous clipboard for
+  the "selection" and paste a corrected copy of it. v5.1 uses a sentinel
+  marker instead and quietly does nothing when no text is found.
+- **The .exe closed instantly (v5 bug)**: fixed in v5.1. With `--noconsole`
+  there is no stdout, and v5's status printing crashed on start. Rebuild
+  the .exe from v5.1.
 
 ## Building a .exe
 

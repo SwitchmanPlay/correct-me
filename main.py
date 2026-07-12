@@ -13,10 +13,18 @@ Run:  python main.py            (tray mode)
 
 import argparse
 import json
+import os
 import queue
 import sys
 import threading
 import time
+
+# With pyinstaller --noconsole there is no console: stdout/stderr are None and
+# any print() would crash the app on start. Route them to devnull instead.
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 import keyboard
 import pyperclip
@@ -65,24 +73,28 @@ def set_state(state: str, detail: str = "") -> None:
 
 # ---------------------------------------------------------------- clipboard
 
-def _poll_clipboard(deadline: float) -> str:
+# Unique marker put on the clipboard before Ctrl+C. Clearing the clipboard
+# with an empty string is unreliable on Windows (clipboard history/managers
+# can ignore it), which made v5 "correct" stale clipboard text when the
+# field was empty. A non-empty sentinel is registered reliably.
+_PROBE = "[correct-me-probe-7f3a]"
+
+
+def _copy_selection(timeout: float) -> str:
+    """Send Ctrl+C and poll the clipboard until the copy lands (or timeout)."""
+    pyperclip.copy(_PROBE)
+    time.sleep(0.03)
+    keyboard.send("ctrl+c")
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
             text = pyperclip.paste()
         except pyperclip.PyperclipException:
             text = ""
-        if text:
+        if text and text != _PROBE:
             return text
         time.sleep(0.02)
     return ""
-
-
-def _copy_selection(timeout: float) -> str:
-    """Send Ctrl+C and poll the clipboard until the copy lands (or timeout)."""
-    pyperclip.copy("")  # so we can tell whether Ctrl+C actually copied anything
-    time.sleep(0.03)
-    keyboard.send("ctrl+c")
-    return _poll_clipboard(time.monotonic() + timeout)
 
 
 def grab_selection() -> tuple[str, str, bool]:
@@ -149,9 +161,8 @@ def on_hotkey() -> None:
                 "as administrator, run this app as administrator too.)"
             )
             pyperclip.copy(previous)
-            beep(ok=False)
             ok = False
-            detail = "no text found"
+            detail = "no text found - nothing done"
             return
 
         print(f"[fixing] {len(text)} chars ...", end=" ", flush=True)
