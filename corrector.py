@@ -22,19 +22,59 @@ if getattr(sys, "frozen", False):
 else:
     BASE_DIR = Path(__file__).resolve().parent
 
+# Localhost calls must bypass any system proxy: with a proxy configured,
+# requests routes even 127.0.0.1 traffic through it, which can add seconds
+# per correction (symptom: client-side seconds far above the server's own
+# timing). A shared session also reuses one keep-alive TCP connection.
+SESSION = requests.Session()
+SESSION.trust_env = False
+
+DEFAULT_CONFIG = {
+    "model": "google/gemma-4-e2b",
+    "base_url": "http://localhost:1234/v1",
+    "hotkey": "insert",
+    "hotkey_selection": "alt+insert",
+    "suppress_hotkey": True,
+    "disable_thinking": True,
+    "keep_alive_minutes": 0,
+    "temperature": 0,
+    "max_chars": 4000,
+    "timeout_seconds": 60,
+    "selection_copy_timeout": 0.3,
+    "clipboard_timeout": 1.0,
+    "paste_delay": 0.05,
+    "restore_delay": 0.2,
+    "restore_clipboard": True,
+    "warm_up_on_start": True,
+}
+
 
 def load_config() -> dict:
-    with open(BASE_DIR / "config.json", encoding="utf-8") as f:
-        return json.load(f)
+    """Load config.json; if it is missing (e.g. next to a freshly built .exe),
+    create it with defaults so the app runs from any folder without setup.
+    Missing keys are filled from defaults."""
+    path = BASE_DIR / "config.json"
+    if not path.exists():
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(DEFAULT_CONFIG, f, indent=2)
+            f.write("\n")
+        applog.log("config_created", note=f"no config.json found - wrote defaults to {path}")
+        return dict(DEFAULT_CONFIG)
+    with open(path, encoding="utf-8") as f:
+        cfg = dict(DEFAULT_CONFIG)
+        cfg.update(json.load(f))
+        return cfg
 
 
 def load_glossary() -> list[str]:
     """Words the model must never 'correct' (names, slang, project terms)."""
     path = BASE_DIR / "glossary.json"
-    if path.exists():
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    return []
+    if not path.exists():
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("[]\n")
+        return []
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 SYSTEM_PROMPT = """You are a silent text-correction engine.
@@ -146,7 +186,7 @@ def correct(text: str, cfg: dict | None = None, glossary: list[str] | None = Non
 
     start = time.perf_counter()
     try:
-        resp = requests.post(
+        resp = SESSION.post(
             cfg["base_url"].rstrip("/") + "/chat/completions",
             json=payload,
             timeout=cfg.get("timeout_seconds", 60),
@@ -207,7 +247,7 @@ def warm_up(cfg: dict | None = None) -> None:
     """Load the model into memory so the first hotkey press is fast."""
     cfg = cfg or load_config()
     try:
-        requests.post(
+        SESSION.post(
             cfg["base_url"].rstrip("/") + "/chat/completions",
             json={
                 "model": cfg["model"],

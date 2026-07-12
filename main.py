@@ -1,12 +1,16 @@
-"""correct-me v6 - hotkey text correction with a tray icon, settings GUI and
+"""correct-me v7 - hotkey text correction with a tray icon, settings GUI and
 a single JSONL log file (correct-me.log).
 
-Press the hotkey (default: Insert) in any text field. If text is selected, it
-is corrected and replaced. If nothing is selected, the whole field is grabbed
-via Ctrl+A and corrected - type your chat message, press Insert, hit send.
-Fully local, no cloud.
+Two hotkeys:
+- Insert (default): corrects the WHOLE field - Ctrl+A, copy, correct, paste.
+- Alt+Insert: corrects only the text you selected first.
 
-Runs as a system tray icon (right-click: Settings / Pause / Quit).
+Why two modes instead of auto-detection: many editors "helpfully" copy the
+current line (Notepad++/Scintilla) or the current block (Notion) when Ctrl+C
+is pressed with nothing selected. v5/v6 probed for a selection with Ctrl+C
+and mistook that auto-copy for a real selection, correcting random lines.
+v7 never probes: field mode always selects first, selection mode requires a
+real selection.
 
 Run:  python main.py            (tray mode)
       python main.py --console  (console mode)
@@ -29,19 +33,18 @@ if sys.stderr is None:
 
 import keyboard
 import pyperclip
-import requests
 
 import applog
 import corrector
 from corrector import CorrectionError, correct, load_config, load_glossary, warm_up
 
-APP_VERSION = "6.0"
+APP_VERSION = "7.0"
 
 cfg = load_config()
 glossary = load_glossary()
 _busy = threading.Lock()
 _paused = False
-_hotkey_handle = None
+_hotkey_handles: list = []
 _events: "queue.Queue[str]" = queue.Queue()
 _tray = None  # pystray.Icon once the tray is running
 _ICON_FACTORY = None  # set in run_tray_app (needs PIL)
@@ -82,16 +85,14 @@ class ClipboardBusy(Exception):
 
 
 # Unique marker put on the clipboard before Ctrl+C. Clearing the clipboard
-# with an empty string is unreliable on Windows, and even a non-empty write
-# can be delayed or swallowed when another app (or a clipboard manager) holds
-# the clipboard. The marker is therefore VERIFIED before Ctrl+C is sent: if
-# it never lands, nothing we read can be trusted and the run is aborted.
-# (v5/v5.1 could mistake stale clipboard content for the selection in that
-# case - seen inside Notion, where it pasted an old clipboard back in.)
+# with an empty string is unreliable on Windows, so a stale clipboard could
+# otherwise be mistaken for the copy. The marker is VERIFIED before Ctrl+C
+# is sent: if it never lands, nothing we read can be trusted and the run is
+# aborted.
 _PROBE = "[correct-me-probe-7f3a]"
 
 
-def _copy_selection(timeout: float) -> str:
+def _copy_after_ctrl_c(timeout: float) -> str:
     """Send Ctrl+C and poll the clipboard until the copy lands (or timeout)."""
     try:
         pyperclip.copy(_PROBE)
@@ -120,28 +121,6 @@ def _copy_selection(timeout: float) -> str:
     return ""
 
 
-def grab_selection() -> tuple[str, str, bool]:
-    """Copy the selection; with no selection, select the whole field (Ctrl+A).
-
-    The first probe uses a short timeout (selection_probe_timeout) so the
-    common no-selection case does not burn the full clipboard_timeout.
-    Returns (text, previous_clipboard, used_select_all).
-    """
-    previous = ""
-    try:
-        previous = pyperclip.paste()
-    except pyperclip.PyperclipException:
-        pass
-    text = _copy_selection(cfg.get("selection_probe_timeout", 0.15))
-    if text:
-        return text, previous, False
-    if cfg.get("no_selection", "select_all") != "select_all":
-        return "", previous, False
-    keyboard.send("ctrl+a")
-    time.sleep(0.05)
-    return _copy_selection(cfg.get("clipboard_timeout", 1.0)), previous, True
-
-
 def replace_selection(corrected: str, previous_clipboard: str) -> None:
     pyperclip.copy(corrected)
     time.sleep(cfg.get("paste_delay", 0.05))
@@ -167,19 +146,35 @@ def _deselect() -> None:
 
 # ------------------------------------------------------------------ hotkey
 
-def on_hotkey() -> None:
+def on_hotkey(mode: str) -> None:
+    """mode: "field" (Ctrl+A the whole field) or "selection" (need a real one)."""
     if _paused:
         return
     if not _busy.acquire(blocking=False):
         return  # a correction is already running
     started = time.monotonic()
     set_state("busy", "correcting ...")
-    applog.log("hotkey_press")
+    applog.log("hotkey_press", mode=mode)
     ok = True
     detail = ""
+    made_selection = False
     try:
+        previous = ""
         try:
-            text, previous, used_select_all = grab_selection()
+            previous = pyperclip.paste()
+        except pyperclip.PyperclipException:
+            pass
+
+        try:
+            if mode == "field":
+                # Select the whole field FIRST - never Ctrl+C on a bare caret
+                # (Notepad++ copies the current line, Notion the current block).
+                keyboard.send("ctrl+a")
+                made_selection = True
+                time.sleep(0.05)
+                text = _copy_after_ctrl_c(cfg.get("clipboard_timeout", 1.0))
+            else:
+                text = _copy_after_ctrl_c(cfg.get("selection_copy_timeout", 0.3))
         except ClipboardBusy as exc:
             applog.log(
                 "clipboard_error",
@@ -191,30 +186,27 @@ def on_hotkey() -> None:
             return
 
         if not text.strip():
-            applog.log(
-                "skip_no_text",
-                used_select_all=used_select_all,
-                note=(
-                    "empty field, or the target app blocked Ctrl+C (elevated "
-                    "apps need correct-me to run as administrator too)"
-                ),
-            )
+            if mode == "field":
+                note = (
+                    "empty field, or the target app blocked Ctrl+A/Ctrl+C "
+                    "(elevated apps need correct-me to run as administrator too)"
+                )
+            else:
+                note = "no text selected - selection mode needs a real selection"
+            applog.log("skip_no_text", mode=mode, note=note)
+            if made_selection:
+                _deselect()
             pyperclip.copy(previous)
             ok = False
             detail = "no text found - nothing done"
             return
 
-        applog.log(
-            "grabbed",
-            chars=len(text),
-            used_select_all=used_select_all,
-            text=applog.short(text),
-        )
+        applog.log("grabbed", mode=mode, chars=len(text), text=applog.short(text))
         try:
             corrected, seconds = correct(text, cfg, glossary)
         except CorrectionError as exc:
             applog.log("error", note=str(exc))
-            if used_select_all:
+            if made_selection:
                 _deselect()
             pyperclip.copy(previous)
             beep(ok=False)
@@ -224,7 +216,7 @@ def on_hotkey() -> None:
 
         if corrected == text:
             applog.log("nothing_to_fix", model_seconds=round(seconds, 2))
-            if used_select_all:
+            if made_selection:
                 _deselect()
             pyperclip.copy(previous)
             beep(ok=True)
@@ -249,25 +241,41 @@ def on_hotkey() -> None:
             set_state("idle" if ok else "error", detail)
 
 
-def register_hotkey() -> str:
-    """(Re)register the global hotkey from cfg. Returns the hotkey string."""
-    global _hotkey_handle
-    if _hotkey_handle is not None:
+def register_hotkeys() -> tuple[str, str]:
+    """(Re)register both global hotkeys from cfg. Returns (field, selection)."""
+    global _hotkey_handles
+    for handle in _hotkey_handles:
         try:
-            keyboard.remove_hotkey(_hotkey_handle)
+            keyboard.remove_hotkey(handle)
         except (KeyError, ValueError):
             pass
-        _hotkey_handle = None
-    hotkey = cfg.get("hotkey", "insert")
+    _hotkey_handles = []
     # suppress=True swallows the key so it cannot reach the target app.
-    # Critical for keys like Home/End/Insert, which would otherwise move the
-    # caret / toggle modes and destroy the selection before we can copy it.
-    _hotkey_handle = keyboard.add_hotkey(
-        hotkey,
-        lambda: threading.Thread(target=on_hotkey, daemon=True).start(),
-        suppress=cfg.get("suppress_hotkey", True),
+    # Critical for keys like Insert/Home, which would otherwise toggle modes /
+    # move the caret and destroy the selection before we can copy it.
+    suppress = cfg.get("suppress_hotkey", True)
+    field_key = cfg.get("hotkey", "insert")
+    _hotkey_handles.append(
+        keyboard.add_hotkey(
+            field_key,
+            lambda: threading.Thread(
+                target=on_hotkey, args=("field",), daemon=True
+            ).start(),
+            suppress=suppress,
+        )
     )
-    return hotkey
+    sel_key = (cfg.get("hotkey_selection") or "").strip()
+    if sel_key and sel_key != field_key:
+        _hotkey_handles.append(
+            keyboard.add_hotkey(
+                sel_key,
+                lambda: threading.Thread(
+                    target=on_hotkey, args=("selection",), daemon=True
+                ).start(),
+                suppress=suppress,
+            )
+        )
+    return field_key, sel_key
 
 
 def apply_config(new_cfg: dict) -> None:
@@ -276,27 +284,43 @@ def apply_config(new_cfg: dict) -> None:
     cfg.clear()
     cfg.update(new_cfg)
     try:
-        register_hotkey()
+        register_hotkeys()
     except (ValueError, KeyError) as exc:
         cfg.clear()
         cfg.update(old_cfg)
-        register_hotkey()
+        register_hotkeys()
         raise ValueError(str(exc))
     with open(corrector.BASE_DIR / "config.json", "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
         f.write("\n")
-    applog.log("config_saved", hotkey=cfg["hotkey"], model=cfg["model"])
+    applog.log(
+        "config_saved",
+        hotkey=cfg["hotkey"],
+        hotkey_selection=cfg.get("hotkey_selection", ""),
+        model=cfg["model"],
+    )
 
 
 def fetch_models(base_url: str) -> list[str]:
     """List model ids from the local server (LM Studio / Ollama)."""
     try:
-        resp = requests.get(base_url.rstrip("/") + "/models", timeout=5)
+        resp = corrector.SESSION.get(base_url.rstrip("/") + "/models", timeout=5)
         resp.raise_for_status()
         data = resp.json().get("data", [])
         return sorted(item.get("id", "") for item in data if item.get("id"))
-    except (requests.RequestException, ValueError, AttributeError):
+    except Exception:
         return []
+
+
+def _keep_alive_loop() -> None:
+    """Ping the model periodically so JIT loading / auto-unload never evicts
+    it (kills the several-second reload on the first correction after idle)."""
+    while True:
+        minutes = cfg.get("keep_alive_minutes", 0)
+        if not minutes or minutes <= 0:
+            return
+        time.sleep(minutes * 60)
+        warm_up(cfg)
 
 
 # --------------------------------------------------------------- tray GUI
@@ -327,8 +351,8 @@ def open_settings(root) -> None:
     url_var = tk.StringVar(value=cfg.get("base_url", "http://localhost:1234/v1"))
     model_var = tk.StringVar(value=cfg.get("model", ""))
     hotkey_var = tk.StringVar(value=cfg.get("hotkey", "insert"))
+    sel_hotkey_var = tk.StringVar(value=cfg.get("hotkey_selection", "alt+insert"))
     suppress_var = tk.BooleanVar(value=bool(cfg.get("suppress_hotkey", True)))
-    selectall_var = tk.BooleanVar(value=cfg.get("no_selection", "select_all") == "select_all")
     restore_var = tk.BooleanVar(value=bool(cfg.get("restore_clipboard", True)))
     think_var = tk.BooleanVar(value=bool(cfg.get("disable_thinking", True)))
     warm_var = tk.BooleanVar(value=bool(cfg.get("warm_up_on_start", True)))
@@ -364,18 +388,21 @@ def open_settings(root) -> None:
     ttk.Button(frm, text="Refresh", command=refresh_models).grid(row=1, column=2, padx=(6, 0))
     threading.Thread(target=_populate_models, daemon=True).start()
 
-    ttk.Label(frm, text="Hotkey").grid(row=2, column=0, sticky="w")
+    ttk.Label(frm, text="Hotkey (whole field)").grid(row=2, column=0, sticky="w")
     ttk.Entry(frm, textvariable=hotkey_var, width=20).grid(row=2, column=1, sticky="w", pady=2)
-    ttk.Label(frm, text="e.g. insert, home, f8, ctrl+alt+g").grid(row=2, column=2, sticky="w")
+    ttk.Label(frm, text="e.g. insert, f8, ctrl+alt+g").grid(row=2, column=2, sticky="w")
+
+    ttk.Label(frm, text="Hotkey (selection only)").grid(row=3, column=0, sticky="w")
+    ttk.Entry(frm, textvariable=sel_hotkey_var, width=20).grid(row=3, column=1, sticky="w", pady=2)
+    ttk.Label(frm, text="empty = disabled").grid(row=3, column=2, sticky="w")
 
     checks = [
         ("Swallow the hotkey (required for Insert/Home/End)", suppress_var),
-        ("Correct the whole field when nothing is selected (Ctrl+A)", selectall_var),
         ("Restore the previous clipboard after pasting", restore_var),
         ("Disable Gemma thinking tokens (faster)", think_var),
         ("Warm up the model on start", warm_var),
     ]
-    row = 3
+    row = 4
     for label, var in checks:
         ttk.Checkbutton(frm, text=label, variable=var).grid(
             row=row, column=0, columnspan=3, sticky="w"
@@ -396,8 +423,8 @@ def open_settings(root) -> None:
         new_cfg["base_url"] = url_var.get().strip() or "http://localhost:1234/v1"
         new_cfg["model"] = model_var.get().strip() or cfg.get("model", "")
         new_cfg["hotkey"] = hotkey_var.get().strip() or "insert"
+        new_cfg["hotkey_selection"] = sel_hotkey_var.get().strip()
         new_cfg["suppress_hotkey"] = bool(suppress_var.get())
-        new_cfg["no_selection"] = "select_all" if selectall_var.get() else "off"
         new_cfg["restore_clipboard"] = bool(restore_var.get())
         new_cfg["disable_thinking"] = bool(think_var.get())
         new_cfg["warm_up_on_start"] = bool(warm_var.get())
@@ -483,8 +510,9 @@ def run_tray_app() -> None:
 
 def run_console() -> None:
     print(
-        f"Ready. Press {cfg.get('hotkey', 'insert').upper()} in a text field "
-        "(selection optional). Ctrl+C here to quit."
+        f"Ready. {cfg.get('hotkey', 'insert').upper()} = correct the whole "
+        f"field, {cfg.get('hotkey_selection', 'alt+insert').upper()} = correct "
+        "the selection. Ctrl+C here to quit."
     )
     try:
         keyboard.wait()
@@ -496,7 +524,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="correct-me")
     parser.add_argument(
         "--hotkey",
-        help='override the hotkey from config.json, e.g. --hotkey "page up" or --hotkey f8',
+        help='override the whole-field hotkey, e.g. --hotkey "page up" or --hotkey f8',
     )
     parser.add_argument(
         "--console",
@@ -507,18 +535,22 @@ def main() -> None:
     if args.hotkey:
         cfg["hotkey"] = args.hotkey  # session override; persisted only if you Save in Settings
 
-    hotkey = register_hotkey()
+    field_key, sel_key = register_hotkeys()
     applog.log(
         "app_start",
         version=APP_VERSION,
         model=cfg["model"],
         base_url=cfg["base_url"],
-        hotkey=hotkey,
+        hotkey=field_key,
+        hotkey_selection=sel_key,
+        keep_alive_minutes=cfg.get("keep_alive_minutes", 0),
         frozen=bool(getattr(sys, "frozen", False)),
         log_file=str(applog.LOG_PATH),
     )
     if cfg.get("warm_up_on_start", True):
         threading.Thread(target=warm_up, args=(cfg,), daemon=True).start()
+    if cfg.get("keep_alive_minutes", 0):
+        threading.Thread(target=_keep_alive_loop, daemon=True).start()
 
     if args.console:
         run_console()

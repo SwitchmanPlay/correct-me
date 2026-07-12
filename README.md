@@ -1,9 +1,13 @@
 # correct-me (MVP - stock Gemma 4 E2B)
 
-Press `Insert` (configurable) in any text field and the text is replaced with
-a grammar/spelling/punctuation-corrected version. **No selection needed**:
-with nothing selected, the whole input field is corrected - type your chat
-message, press Insert, hit send. Runs 100% locally - no cloud, no telemetry.
+Two hotkeys (both configurable):
+
+- **Insert** - corrects the **whole field**: type your chat message, press
+  Insert, hit send. The app does Ctrl+A for you - no selecting needed.
+- **Alt+Insert** - corrects **only the text you selected** first.
+
+The result replaces the text with a grammar/spelling/punctuation-corrected
+version. Runs 100% locally - no cloud, no telemetry.
 
 Since v5 it lives in the **system tray**: a status icon plus a settings window
 (model picker, hotkey, toggles) - no console window needed.
@@ -51,10 +55,15 @@ python main.py           # the actual hotkey app (tray icon)
 python main.py --console # old v4-style console mode
 ```
 
-Type a message anywhere (browser, Telegram, VS Code...) and just press
-**Insert** - no selecting needed; the app grabs the whole input field (Ctrl+A).
-Select text first only when you want to correct part of it.
+Type a message anywhere (browser, Telegram...) and just press **Insert** -
+the app selects the whole field (Ctrl+A) and corrects it. To correct only
+part of a text, select it and press **Alt+Insert**.
 One high beep = done. Two low beeps = no text / error.
+
+Careful with Insert in full editors: there "the whole field" is the whole
+document (that is what Ctrl+A selects in Notepad++ and friends). Anything
+over `max_chars` is refused, so a stray press on a big file does nothing -
+use Alt+Insert with a selection in editors.
 
 The **tray icon** shows status: green = ready, orange = correcting, red =
 error (hover it for details, like timings). Right-click it for **Settings**
@@ -65,7 +74,8 @@ are written to `config.json` and applied instantly - no restart.
 ## How it works
 
 ```
-hotkey -> Ctrl+C (Ctrl+A first if nothing selected) -> prompt + glossary
+Insert -> Ctrl+A + Ctrl+C   (Alt+Insert -> Ctrl+C on your selection)
+       -> prompt + glossary
        -> local server (Gemma 4 E2B, temp 0, thinking disabled)
        -> output cleaning -> guard rails -> simulated Ctrl+V -> clipboard restored
 ```
@@ -86,12 +96,13 @@ hotkey -> Ctrl+C (Ctrl+A first if nothing selected) -> prompt + glossary
 | --- | --- | --- |
 | `model` | `google/gemma-4-e2b` | Model id (LM Studio) or tag (Ollama, e.g. `gemma4:e2b`) |
 | `base_url` | `http://localhost:1234/v1` | LM Studio; use `http://localhost:11434/v1` for Ollama |
-| `hotkey` | `insert` | Global hotkey - see "Changing the hotkey" below |
-| `suppress_hotkey` | `true` | Swallow the key so it never reaches the app (required for Home/End/Page Up) |
-| `no_selection` | `select_all` | With no selection, grab the whole field via Ctrl+A (`off` to disable) |
+| `hotkey` | `insert` | Whole-field hotkey - see "Changing the hotkey" below |
+| `hotkey_selection` | `alt+insert` | Selection-only hotkey (empty string disables it) |
+| `suppress_hotkey` | `true` | Swallow the keys so they never reach the app (required for Insert/Home/End) |
 | `disable_thinking` | `true` | Suppress Gemma 4's hidden reasoning tokens (big latency win) |
+| `keep_alive_minutes` | `0` | If > 0, ping the model every N minutes so JIT loading / auto-unload never evicts it |
 | `max_chars` | `4000` | Refuse selections longer than this |
-| `selection_probe_timeout` | `0.15` | How long to wait for a selection copy before falling back to Ctrl+A |
+| `selection_copy_timeout` | `0.3` | Max seconds to wait for the copy in selection mode |
 | `clipboard_timeout` | `1.0` | Max seconds to wait for the Ctrl+A copy to land (polled every 20 ms) |
 | `paste_delay` | `0.05` | Pause between setting the clipboard and sending Ctrl+V |
 | `restore_delay` | `0.2` | Pause after Ctrl+V before the old clipboard is restored (in background) |
@@ -101,9 +112,9 @@ hotkey -> Ctrl+C (Ctrl+A first if nothing selected) -> prompt + glossary
 
 Three ways:
 
-- Easiest: right-click the tray icon -> **Settings**.
-- Permanent: edit `"hotkey"` in `config.json`.
-- One-off: `python main.py --hotkey "page up"`
+- Easiest: right-click the tray icon -> **Settings** (both hotkeys).
+- Permanent: edit `"hotkey"` / `"hotkey_selection"` in `config.json`.
+- One-off: `python main.py --hotkey "page up"` (whole-field hotkey)
 
 Anything the Python [`keyboard`](https://github.com/boppreh/keyboard) library
 understands works. Good low-conflict choices:
@@ -141,11 +152,20 @@ What the 4-5 s per correction was made of, and what to do:
 - **CPU instead of GPU**: check LM Studio shows full GPU offload for the
   model. CPU-only is a 5-10x slowdown - on your 4060 Ti there is no reason
   for it.
-- **Fixed overhead (v5)**: pressing the hotkey with *nothing selected* used
-  to burn the full 1.0 s `clipboard_timeout` before falling back to Ctrl+A -
-  a 1-second tax on the main use case. v5 probes the selection for only
-  `selection_probe_timeout` (0.15 s), trims the paste sleeps, and restores
-  the clipboard in the background. Total is now roughly model time + ~0.4 s.
+- **Fixed overhead (v5/v7)**: v5 trimmed the paste sleeps and moved the
+  clipboard restore to the background; v7 dropped the selection probe
+  entirely (Insert goes straight to Ctrl+A). Total is now roughly model
+  time + ~0.2 s.
+- **System proxy tax (v7)**: with a Windows proxy configured, Python's
+  `requests` routes even `localhost` calls through it - a constant extra
+  second or more per correction. Symptom: the app's `model_seconds` in
+  `correct-me.log` is far above the server's own `total time` in the LM
+  Studio log for the same request. v7 bypasses proxies for the local server
+  and reuses one keep-alive connection.
+- **Auto-unload, solved in-app**: instead of babysitting LM Studio's JIT
+  idle TTL, set `keep_alive_minutes` (e.g. `4`) - the app pings the model
+  periodically so it always stays warm. Costs idle VRAM, kills the
+  several-second reload after a pause.
 - **Generation itself**: the model re-types the whole selection, so latency
   scales with text length. Warm model + GPU offload: roughly 0.5-1 s for a
   short sentence, 2-4 s for a long paragraph.
@@ -207,8 +227,9 @@ share) this file - it contains the whole story, no console needed.
   elevated (as administrator); Windows blocks keystroke injection into
   elevated windows. Run the script as administrator too. Otherwise admin is
   NOT needed.
-- **Pressed Home outside a text field**: Ctrl+A may select a whole page;
-  anything over `max_chars` is refused, so nothing happens - by design.
+- **Pressed Insert outside a text field / in a big document**: Ctrl+A may
+  select a whole page or file; anything over `max_chars` is refused, so
+  nothing happens - by design.
 - **Pastes nothing or stale text**: a clipboard manager may interfere - try
   disabling it, or raise `clipboard_timeout`.
 - **Hotkey does nothing in one app (e.g. Notepad++)**: check
@@ -217,12 +238,18 @@ share) this file - it contains the whole story, no console needed.
   administrator too. A `clipboard_error` event = another program was holding
   the clipboard. A `skip_no_text` event = Ctrl+C copied nothing there - try
   selecting the text manually first.
-- **It pasted unrelated old clipboard text (v5/v5.1 bug, seen in Notion)**:
-  fixed in v6. If the clipboard was locked or a clipboard manager interfered,
-  the app could mistake your previous clipboard for the "selection" and
-  paste a corrected copy of it. v6 verifies its probe marker actually landed
-  on the clipboard before trusting anything it reads, and aborts (two beeps,
-  `clipboard_error` in the log) instead of guessing.
+- **In Notion/Notepad++ it corrected a random line instead of the field
+  (v5/v6 bug)**: fixed in v7. Many editors "helpfully" copy the current
+  line (Notepad++ and everything Scintilla-based) or the current block
+  (Notion) when you press Ctrl+C with **nothing selected**. Older versions
+  probed for a selection with Ctrl+C and mistook that auto-copy for a real
+  selection, then pasted the "correction" at the caret. v7 never probes:
+  Insert always selects the whole field first, and Alt+Insert only acts on
+  a real selection.
+- **It pasted unrelated old clipboard text (v5/v5.1 bug)**: fixed in v6 -
+  the app verifies its probe marker actually landed on the clipboard before
+  trusting anything it reads, and aborts (two beeps, `clipboard_error` in
+  the log) instead of guessing.
 - **Two beeps + `[error]` in console**: server not running or wrong `model`
   id; the console message says which.
 - **Thinking turns itself back on (slow again after a restart)**: LM
@@ -244,16 +271,18 @@ share) this file - it contains the whole story, no console needed.
 
 ```
 pip install pyinstaller
-pyinstaller --onefile --noconsole --name correct-me main.py
+pyinstaller --onefile --noconsole --distpath . --name correct-me main.py
 ```
 
 Run the command **inside the correct-me folder** (where `main.py` lives),
 otherwise pyinstaller fails with "no file or directory named main.py".
-
-`dist/correct-me.exe` is a single file you can drop into autostart. Keep
-`config.json` and `glossary.json` next to the .exe (the app looks for them
-there when frozen). `--noconsole` is fine since v5: status and errors are
-shown on the tray icon (hover it), and problems still beep twice.
+`--distpath .` drops `correct-me.exe` straight into the project folder, next
+to your `config.json` - run it right there, nothing to move. And since v7
+the app **creates default `config.json` / `glossary.json` if they are
+missing**, so the .exe starts from any folder (you would just lose your
+custom settings until you copy your files next to it). `--noconsole` is
+fine since v5: status and errors are shown on the tray icon (hover it),
+problems still beep twice, and everything lands in `correct-me.log`.
 
 ## Known limitations (MVP)
 
