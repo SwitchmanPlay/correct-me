@@ -1,7 +1,7 @@
 {
   "model": "google/gemma-4-e2b",
   "base_url": "http://localhost:1234/v1",
-  "hotkey": "home",
+  "hotkey": "insert",
   "suppress_hotkey": true,
   "no_selection": "select_all",
   "disable_thinking": true,

@@ -1,9 +1,9 @@
 # correct-me (MVP - stock Gemma 4 E2B)
 
-Press `Home` (configurable) in any text field and the text is replaced with a
-grammar/spelling/punctuation-corrected version. **No selection needed**: with
-nothing selected, the whole input field is corrected - type your chat
-message, press Home, hit send. Runs 100% locally - no cloud, no telemetry.
+Press `Insert` (configurable) in any text field and the text is replaced with
+a grammar/spelling/punctuation-corrected version. **No selection needed**:
+with nothing selected, the whole input field is corrected - type your chat
+message, press Insert, hit send. Runs 100% locally - no cloud, no telemetry.
 
 Since v5 it lives in the **system tray**: a status icon plus a settings window
 (model picker, hotkey, toggles) - no console window needed.
@@ -52,7 +52,7 @@ python main.py --console # old v4-style console mode
 ```
 
 Type a message anywhere (browser, Telegram, VS Code...) and just press
-**Home** - no selecting needed; the app grabs the whole input field (Ctrl+A).
+**Insert** - no selecting needed; the app grabs the whole input field (Ctrl+A).
 Select text first only when you want to correct part of it.
 One high beep = done. Two low beeps = no text / error.
 
@@ -86,7 +86,7 @@ hotkey -> Ctrl+C (Ctrl+A first if nothing selected) -> prompt + glossary
 | --- | --- | --- |
 | `model` | `google/gemma-4-e2b` | Model id (LM Studio) or tag (Ollama, e.g. `gemma4:e2b`) |
 | `base_url` | `http://localhost:1234/v1` | LM Studio; use `http://localhost:11434/v1` for Ollama |
-| `hotkey` | `home` | Global hotkey - see "Changing the hotkey" below |
+| `hotkey` | `insert` | Global hotkey - see "Changing the hotkey" below |
 | `suppress_hotkey` | `true` | Swallow the key so it never reaches the app (required for Home/End/Page Up) |
 | `no_selection` | `select_all` | With no selection, grab the whole field via Ctrl+A (`off` to disable) |
 | `disable_thinking` | `true` | Suppress Gemma 4's hidden reasoning tokens (big latency win) |
@@ -108,7 +108,7 @@ Three ways:
 Anything the Python [`keyboard`](https://github.com/boppreh/keyboard) library
 understands works. Good low-conflict choices:
 
-- Single keys: `home` (default), `insert`, `page up`, `pause`, `scroll lock`, `f8`, `f9`
+- Single keys: `insert` (default), `page up`, `pause`, `scroll lock`, `f8`, `f9`
 - Combos: `ctrl+alt+g`, `ctrl+shift+space`
 
 Note: since v3 the hotkey is **suppressed** - the app swallows the key, so it
@@ -117,6 +117,12 @@ while correct-me is running). This is required: keys like Home/End/Page Up
 move the caret and collapse the text selection before the app can copy it -
 exactly why v2 always reported "nothing selected". If you use a combo like
 `ctrl+alt+g` and want the key back, set `"suppress_hotkey": false`.
+
+Why `insert` became the default in v6: `home` is a caret-movement key that
+editors like Notepad++ and IDEs rely on constantly, so swallowing it there is
+confusing and easy to blame on the app. `insert` barely does anything in
+modern apps, which makes it the least annoying single key to sacrifice. Avoid
+`home`/`end` unless you never use text editors.
 
 ## Speed
 
@@ -183,6 +189,15 @@ Don't go below Q4 (Q2/Q3) - correction quality visibly degrades. And there is
 no better *smaller* model for multilingual correction right now: Gemma 4 E2B
 is already the floor of its class, so shrink the quant, not the model.
 
+## Logs
+
+Everything the app does is appended to **`correct-me.log`** - one JSON object
+per line - next to `config.json` (or next to the .exe when frozen): startup
+config, every hotkey press, what was grabbed (truncated), model timings,
+hidden-thinking warnings, guard-rail rejections, and errors. The file trims
+itself at ~2 MB. When something misbehaves, reproduce it once and read (or
+share) this file - it contains the whole story, no console needed.
+
 ## Troubleshooting
 
 - **"nothing selected" everywhere (the v2 bug)**: fixed in v3. Home/End/Page
@@ -196,6 +211,18 @@ is already the floor of its class, so shrink the quant, not the model.
   anything over `max_chars` is refused, so nothing happens - by design.
 - **Pastes nothing or stale text**: a clipboard manager may interfere - try
   disabling it, or raise `clipboard_timeout`.
+- **Hotkey does nothing in one app (e.g. Notepad++)**: check
+  `correct-me.log`. No `hotkey_press` event = the press never reached the
+  app - the target app probably runs elevated, so run correct-me as
+  administrator too. A `clipboard_error` event = another program was holding
+  the clipboard. A `skip_no_text` event = Ctrl+C copied nothing there - try
+  selecting the text manually first.
+- **It pasted unrelated old clipboard text (v5/v5.1 bug, seen in Notion)**:
+  fixed in v6. If the clipboard was locked or a clipboard manager interfered,
+  the app could mistake your previous clipboard for the "selection" and
+  paste a corrected copy of it. v6 verifies its probe marker actually landed
+  on the clipboard before trusting anything it reads, and aborts (two beeps,
+  `clipboard_error` in the log) instead of guessing.
 - **Two beeps + `[error]` in console**: server not running or wrong `model`
   id; the console message says which.
 - **Thinking turns itself back on (slow again after a restart)**: LM
@@ -219,6 +246,9 @@ is already the floor of its class, so shrink the quant, not the model.
 pip install pyinstaller
 pyinstaller --onefile --noconsole --name correct-me main.py
 ```
+
+Run the command **inside the correct-me folder** (where `main.py` lives),
+otherwise pyinstaller fails with "no file or directory named main.py".
 
 `dist/correct-me.exe` is a single file you can drop into autostart. Keep
 `config.json` and `glossary.json` next to the .exe (the app looks for them

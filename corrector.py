@@ -14,6 +14,8 @@ from pathlib import Path
 
 import requests
 
+import applog
+
 # When frozen into a .exe (PyInstaller), config lives next to the .exe.
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent
@@ -163,17 +165,26 @@ def correct(text: str, cfg: dict | None = None, glossary: list[str] | None = Non
     except (KeyError, IndexError, ValueError) as exc:
         raise CorrectionError(f"Unexpected response from the server: {exc}") from exc
 
-    if cfg.get("disable_thinking", True):
-        try:
-            thought = data["usage"]["completion_tokens_details"]["reasoning_tokens"]
-        except (KeyError, TypeError):
-            thought = 0
-        if thought:
-            print(
-                f"\n[warn] the server spent {thought} hidden thinking tokens. LM Studio "
-                "ignores the API's thinking-off flag - disable thinking in the model's "
-                "own settings (README -> Troubleshooting) to make corrections fast."
-            )
+    try:
+        thought = data["usage"]["completion_tokens_details"]["reasoning_tokens"]
+    except (KeyError, TypeError):
+        thought = 0
+    applog.log(
+        "model_reply",
+        seconds=round(elapsed, 2),
+        chars_in=len(text),
+        chars_out=len(raw),
+        reasoning_tokens=thought,
+    )
+    if thought and cfg.get("disable_thinking", True):
+        applog.log(
+            "thinking_warning",
+            note=(
+                f"the server spent {thought} hidden thinking tokens; LM Studio "
+                "ignores the API's thinking-off flag - disable thinking in the "
+                "model's own settings (README -> Troubleshooting)"
+            ),
+        )
 
     out = _clean_output(text, raw)
 
@@ -183,7 +194,12 @@ def correct(text: str, cfg: dict | None = None, glossary: list[str] | None = Non
     out = lead + out.strip() + trail
 
     if not _passes_guards(text, out):
-        return text, elapsed  # silently keep the original
+        applog.log(
+            "guard_reject",
+            note="model output rejected (too different from the input) - original kept",
+            output=applog.short(out),
+        )
+        return text, elapsed
     return out, elapsed
 
 
