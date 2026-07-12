@@ -1,50 +1,53 @@
 {
-  "tag": "baseline",
+  "tag": "v7.2",
   "model": "google/gemma-4-e2b",
   "total": {
     "cases": 403,
     "errors": 0,
-    "fix_rate": 0.184,
-    "changed_rate": 0.678,
-    "false_change_rate": 0.5,
+    "fix_rate": 0.295,
+    "changed_rate": 0.839,
+    "false_change_rate": 0.437,
+    "false_change_hard_rate": 0.303,
     "latency_mean": 0.17,
-    "latency_p50": 0.15,
+    "latency_p50": 0.14,
     "latency_p95": 0.33
   },
   "by_bucket": {
     "layout": {
       "cases": 60,
       "errors": 0,
-      "fix_rate": 0.0,
-      "changed_rate": 0.267,
-      "latency_mean": 0.17,
-      "latency_p50": 0.14,
-      "latency_p95": 0.28
+      "fix_rate": 0.5,
+      "changed_rate": 0.95,
+      "latency_mean": 0.13,
+      "latency_p50": 0.12,
+      "latency_p95": 0.2
     },
     "must_not_change": {
       "cases": 82,
       "errors": 0,
-      "false_change_rate": 0.61,
+      "false_change_rate": 0.512,
+      "false_change_hard_rate": 0.354,
       "latency_mean": 0.16,
       "latency_p50": 0.12,
-      "latency_p95": 0.35
+      "latency_p95": 0.34
     },
     "punct": {
       "cases": 80,
       "errors": 0,
-      "fix_rate": 0.188,
-      "changed_rate": 0.738,
+      "fix_rate": 0.175,
+      "changed_rate": 0.75,
       "latency_mean": 0.22,
-      "latency_p50": 0.2,
+      "latency_p50": 0.21,
       "latency_p95": 0.35
     },
     "traps": {
       "cases": 60,
       "errors": 0,
-      "false_change_rate": 0.35,
+      "false_change_rate": 0.333,
+      "false_change_hard_rate": 0.233,
       "latency_mean": 0.17,
-      "latency_p50": 0.15,
-      "latency_p95": 0.28
+      "latency_p50": 0.16,
+      "latency_p95": 0.33
     },
     "typos": {
       "cases": 121,
@@ -52,8 +55,8 @@
       "fix_rate": 0.273,
       "changed_rate": 0.843,
       "latency_mean": 0.16,
-      "latency_p50": 0.15,
-      "latency_p95": 0.24
+      "latency_p50": 0.14,
+      "latency_p95": 0.25
     }
   },
   "by_lang": {
@@ -63,9 +66,10 @@
       "fix_rate": 0.2,
       "changed_rate": 0.85,
       "false_change_rate": 0.375,
+      "false_change_hard_rate": 0.125,
       "latency_mean": 0.19,
-      "latency_p50": 0.18,
-      "latency_p95": 0.29
+      "latency_p50": 0.17,
+      "latency_p95": 0.31
     },
     "en": {
       "cases": 48,
@@ -73,6 +77,7 @@
       "fix_rate": 0.2,
       "changed_rate": 0.733,
       "false_change_rate": 0.333,
+      "false_change_hard_rate": 0.111,
       "latency_mean": 0.21,
       "latency_p50": 0.18,
       "latency_p95": 0.38
@@ -80,22 +85,24 @@
     "ru": {
       "cases": 224,
       "errors": 0,
-      "fix_rate": 0.182,
-      "changed_rate": 0.657,
-      "false_change_rate": 0.531,
-      "latency_mean": 0.16,
-      "latency_p50": 0.14,
-      "latency_p95": 0.28
+      "fix_rate": 0.308,
+      "changed_rate": 0.874,
+      "false_change_rate": 0.457,
+      "false_change_hard_rate": 0.333,
+      "latency_mean": 0.15,
+      "latency_p50": 0.13,
+      "latency_p95": 0.25
     },
     "uk": {
       "cases": 103,
       "errors": 0,
-      "fix_rate": 0.176,
-      "changed_rate": 0.647,
-      "false_change_rate": 0.543,
+      "fix_rate": 0.338,
+      "changed_rate": 0.809,
+      "false_change_rate": 0.457,
+      "false_change_hard_rate": 0.371,
       "latency_mean": 0.18,
       "latency_p50": 0.16,
-      "latency_p95": 0.32
+      "latency_p95": 0.3
     }
   }
 }

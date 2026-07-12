@@ -52,6 +52,14 @@ def normalize(s: str) -> str:
     return s
 
 
+def normalize_hard(s: str) -> str:
+    """Even looser: ignore ALL punctuation and letter case. Used for
+    false_change_hard_rate - style damage beyond punctuation/casing,
+    i.e. the edits that really hurt (word swaps, de-stretching)."""
+    s = re.sub(r"[^\w\s]+", "", normalize(s))
+    return " ".join(s.split()).casefold()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Score correct-me on the eval set")
     parser.add_argument("--evalset", default=str(HERE / "evalset.jsonl"))
@@ -92,8 +100,11 @@ def main() -> None:
             got, seconds, error = "", 0.0, str(exc)
         ok_exact = normalize(got) == normalize(c["expected"]) and not error
         changed = normalize(got) != normalize(c["input"]) if not error else False
+        changed_hard = (
+            normalize_hard(got) != normalize_hard(c["input"]) if not error else False
+        )
         rows.append({**c, "got": got, "seconds": round(seconds, 2), "error": error,
-                     "ok": ok_exact, "changed": changed})
+                     "ok": ok_exact, "changed": changed, "changed_hard": changed_hard})
         if i % 25 == 0 or i == len(cases):
             done_pct = 100 * i // len(cases)
             print(f"  {i}/{len(cases)} ({done_pct}%) elapsed {time.monotonic() - t0:.0f}s")
@@ -112,6 +123,9 @@ def main() -> None:
         if keep_same:
             stats["false_change_rate"] = round(
                 sum(r["changed"] for r in keep_same) / len(keep_same), 3
+            )
+            stats["false_change_hard_rate"] = round(
+                sum(r["changed_hard"] for r in keep_same) / len(keep_same), 3
             )
         if lat:
             stats["latency_mean"] = round(statistics.mean(lat), 2)

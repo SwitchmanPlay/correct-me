@@ -38,7 +38,7 @@ import applog
 import corrector
 from corrector import CorrectionError, correct, load_config, load_glossary, warm_up
 
-APP_VERSION = "7.0"
+APP_VERSION = "7.2"
 
 cfg = load_config()
 glossary = load_glossary()

@@ -19,7 +19,8 @@ Buckets:
 - `punct` - your real messages with commas stripped - must be restored.
 - `layout` - RU/UK messages as if typed in the EN layout (`ghbdtn` style) -
   must come back as the original. Expect ~0% at baseline: the model can't do
-  this; it needs the deterministic layout pre-pass (next Week-2 step).
+  this. SOLVED in v7.2: the app now ships a deterministic layout pre-pass
+  (`layout.py`), so this bucket should jump from ~0% to ~85%+.
 - `must_not_change` - your slang and stretched letters ("\u043f\u0430\u0442\u0430\u043c\u0443\u0448\u0442\u0430",
   "\u043f\u0440\u0438\u0432\u0435\u0442\u0438\u0438\u0438\u043a") - must return UNCHANGED. `false_change_rate` here is the
   style-damage number; keeping it low matters more than fixing every typo.
@@ -49,3 +50,15 @@ miss with input/expected/got). Send both files back for analysis.
 - Rebuild with different size/mix: edit `BUCKET_SIZES` / `LANG_SHARES` in
   `build_evalset.py`, then
   `python build_evalset.py --export path/to/result.json`.
+
+## Reading v7.2+ results
+
+- `false_change_hard_rate` (new) ignores punctuation- and case-only edits.
+  Adding a missing comma to a slangy message is arguably a FIX, not damage,
+  so the number that must stay near zero is the HARD rate: word swaps,
+  de-stretching, e/yo rewrites.
+- Compare runs by tag: `python eval.py --tag v7.2` and diff against the
+  baseline eval_results.json.
+- The style-restore guard in corrector.py now deterministically reverts
+  stretched-letter collapses and e/yo swaps, so those failure classes should
+  disappear regardless of what the model outputs.

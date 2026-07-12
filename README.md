@@ -100,6 +100,7 @@ Insert -> Ctrl+A + Ctrl+C   (Alt+Insert -> Ctrl+C on your selection)
 | `hotkey_selection` | `alt+insert` | Selection-only hotkey (empty string disables it) |
 | `suppress_hotkey` | `true` | Swallow the keys so they never reach the app (required for Insert/Home/End) |
 | `disable_thinking` | `true` | Suppress Gemma 4's hidden reasoning tokens (big latency win) |
+| `fix_layout` | `true` | Wrong-keyboard-layout fixer: RU/UK text typed while the EN layout was active (`ghbdtn`-style) is converted back deterministically, before the model runs. Instant, and it never guesses: it only converts when the result clearly matches your own vocabulary (detector built from your Telegram corpus, `layout.py`). Logged as `layout_fixed`. |
 | `keep_alive_minutes` | `0` | If > 0, ping the model every N minutes so JIT loading / auto-unload never evicts it |
 | `max_chars` | `4000` | Refuse selections longer than this |
 | `selection_copy_timeout` | `0.3` | Max seconds to wait for the copy in selection mode |
