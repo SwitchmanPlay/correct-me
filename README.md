@@ -1,4 +1,40 @@
-# correct-me (MVP - stock Gemma 4 E2B)
+<div align="center">
+
+# correct-me
+
+**One hotkey. Your text corrected in place. 100% local, zero cloud.**
+
+Typos, missing commas and wrong-keyboard-layout text get fixed right where you
+typed them - while your slang and style survive untouched.
+
+![Windows](https://img.shields.io/badge/platform-Windows-0078d4)
+![Python](https://img.shields.io/badge/python-3.10%2B-3776ab)
+![Local](https://img.shields.io/badge/runs-100%25%20local-2ea44f)
+![Model](https://img.shields.io/badge/model-1%20GB%20personal%20fine--tune-b45fff)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
+
+<!-- TODO: demo.gif goes right here (record it with invented text) -->
+
+</div>
+
+This repo is two things at once: a **ready-made product** (tray app, two
+hotkeys, guardrails, works with any OpenAI-compatible local server) and a
+**research project**: an evaluation harness plus a fine-tune pipeline that
+turns *your own* Telegram history into a personal correction model.
+Mine ended up **4x smaller and better than the stock baseline**:
+
+| Same 403-case benchmark, built from my own messages | Stock Gemma 4 E2B (4.2 GB) | Fine-tuned Qwen2.5-1.5B (1.0 GB) |
+| --- | --- | --- |
+| Overall fix rate | 0.337 | **0.444** |
+| Commas restored | 0.188 | **0.412** (2.2x) |
+| Typos fixed | 0.306 | **0.413** |
+| Style damage (hard) | 0.155 | **0.155** (no worse) |
+| Median latency (RTX 4060 Ti) | 0.15 s | **0.09 s** |
+
+Full methodology, the 0.5B-vs-1.5B experiment and honest limitations:
+**[RESULTS.md](RESULTS.md)**.
+
+## ⌨️ The app
 
 Two hotkeys (both configurable):
 
@@ -12,7 +48,8 @@ version. Runs 100% locally - no cloud, no telemetry.
 Since v5 it lives in the **system tray**: a status icon plus a settings window
 (model picker, hotkey, toggles) - no console window needed.
 
-This is Phase 1 (MVP) of the build plan: stock model, no fine-tuning yet.
+The app works with a stock model out of the box; `eval/` measures it on
+your own messages and `train/` fine-tunes a smaller personal model.
 The app talks to any **OpenAI-compatible local server**, so both **LM Studio**
 and **Ollama** work - pick one below.
 
@@ -46,7 +83,7 @@ background service, slightly nicer for an always-on hotkey tool. Since you
 already use LM Studio, start with it - switch to Ollama later only if keeping
 the LM Studio window open annoys you. Not worth switching for any other reason.
 
-## Run
+## 🚀 Run
 
 ```
 pip install -r requirements.txt
@@ -71,7 +108,7 @@ error (hover it for details, like timings). Right-click it for **Settings**
 **Pause** and **Quit**; double-click opens Settings directly. Saved settings
 are written to `config.json` and applied instantly - no restart.
 
-## How it works
+## 🧠 How it works
 
 ```
 Insert -> Ctrl+A + Ctrl+C   (Alt+Insert -> Ctrl+C on your selection)
@@ -90,7 +127,9 @@ Insert -> Ctrl+A + Ctrl+C   (Alt+Insert -> Ctrl+C on your selection)
   loaded only while in use (see the
   auto-unload notes above).
 
-## Config (`config.json`)
+<details>
+<summary><b>⚙️ Config reference (config.json)</b></summary>
+
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -110,7 +149,11 @@ Insert -> Ctrl+A + Ctrl+C   (Alt+Insert -> Ctrl+C on your selection)
 | `restore_delay` | `0.2` | Pause after Ctrl+V before the old clipboard is restored (in background) |
 | `restore_clipboard` | `true` | Put your old clipboard back after pasting |
 
-## Changing the hotkey
+</details>
+
+<details>
+<summary><b>⌨️ Changing the hotkey</b></summary>
+
 
 Three ways:
 
@@ -137,7 +180,11 @@ confusing and easy to blame on the app. `insert` barely does anything in
 modern apps, which makes it the least annoying single key to sacrifice. Avoid
 `home`/`end` unless you never use text editors.
 
-## Speed
+</details>
+
+<details>
+<summary><b>⚡ Speed: how corrections went from 4-5 s to ~0.1 s</b></summary>
+
 
 What the 4-5 s per correction was made of, and what to do:
 
@@ -188,7 +235,11 @@ prompt prefix, and our system prompt is byte-identical on every request - so
 it is processed once per model load, not on every correction. The instructions
 can grow much bigger without adding per-request latency.
 
-## Model size
+</details>
+
+<details>
+<summary><b>📦 Stock model size options</b></summary>
+
 
 The default `google/gemma-4-e2b` LM Studio download (~4.2 GB) is already a
 4-bit quant - that is as small as this model officially gets in a normal GGUF.
@@ -211,7 +262,9 @@ Don't go below Q4 (Q2/Q3) - correction quality visibly degrades. And there is
 no better *smaller* model for multilingual correction right now: Gemma 4 E2B
 is already the floor of its class, so shrink the quant, not the model.
 
-## Logs
+</details>
+
+## 🪵 Logs
 
 Everything the app does is appended to **`correct-me.log`** - one JSON object
 per line - next to `config.json` (or next to the .exe when frozen): startup
@@ -220,7 +273,9 @@ hidden-thinking warnings, guard-rail rejections, and errors. The file trims
 itself at ~2 MB. When something misbehaves, reproduce it once and read (or
 share) this file - it contains the whole story, no console needed.
 
-## Troubleshooting
+<details>
+<summary><b>🔧 Troubleshooting (the full bug archaeology)</b></summary>
+
 
 - **"nothing selected" everywhere (the v2 bug)**: fixed in v3. Home/End/Page
   Up move the caret and destroy the selection before Ctrl+C fires; v3
@@ -269,7 +324,9 @@ share) this file - it contains the whole story, no console needed.
   there is no stdout, and v5's status printing crashed on start. Rebuild
   the .exe from v5.1.
 
-## Building a .exe
+</details>
+
+## 🏗️ Building a .exe
 
 ```
 pip install pyinstaller
@@ -286,7 +343,7 @@ custom settings until you copy your files next to it). `--noconsole` is
 fine since v5: status and errors are shown on the tray icon (hover it),
 problems still beep twice, and everything lands in `correct-me.log`.
 
-## Known limitations (MVP)
+## ⚠️ Known limitations
 
 - Windows-first. The hotkey/paste flow works on Linux/macOS in principle, but
   `keyboard` needs root on Linux, and macOS needs accessibility permissions
@@ -294,7 +351,28 @@ problems still beep twice, and everything lands in `correct-me.log`.
 - Apps that block programmatic paste (some terminals, password fields) won't work.
 - Glossary is static; "learn words the user keeps re-sending" is Phase 5.
 
-## Roadmap
+## 🔒 Make it personal (what is NOT in this repo)
 
-See the build plan: MVP -> datasets + eval set -> LoRA fine-tunes
-(0.5B / 1.5B / 2B) -> quantize -> benchmark table -> polish.
+Three files are generated from my private chat history and are deliberately
+not committed - you generate your own from your own Telegram export
+(Telegram Desktop -> Settings -> Advanced -> Export Telegram data -> JSON):
+
+- `layout.py` - the wrong-layout detector, tuned to your vocabulary:
+  `python gen_layout.py --export result.json --out layout.py`
+  (without it the app still runs; only the layout pre-pass and vocab
+  protection stay off)
+- `eval/evalset.jsonl` - your personal benchmark:
+  `cd eval && python build_evalset.py --export ../result.json`
+- `train/train.jsonl` + `train/val.jsonl` - your fine-tuning dataset:
+  see `train/README.md` for the full recipe (dataset -> QLoRA -> GGUF ->
+  LM Studio), doable on a single 16 GB consumer GPU.
+
+The trained weights stay private too: a model fine-tuned on your chats can
+memorize and leak them. Publish your numbers, not your weights.
+
+## ✅ Status
+
+Done: MVP -> tray app -> guardrails + layout pre-pass -> eval harness ->
+datasets -> QLoRA fine-tunes (0.5B rejected, 1.5B shipped) -> benchmark
+([RESULTS.md](RESULTS.md)). Possible next: a nicer settings UI, glossary
+auto-learning, sentence-parallel correction for long texts.

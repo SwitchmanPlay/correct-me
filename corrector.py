@@ -15,7 +15,14 @@ from pathlib import Path
 import requests
 
 import applog
-import layout
+
+# layout.py is personal (generated from the owner's own chat corpus by
+# gen_layout.py) and is NOT part of the public repo. Without it the app
+# still works; only the wrong-layout pre-pass and vocab protection are off.
+try:
+    import layout
+except ImportError:
+    layout = None
 
 # When frozen into a .exe (PyInstaller), config lives next to the .exe.
 if getattr(sys, "frozen", False):
@@ -163,7 +170,7 @@ _EDGE_PUNCT = re.compile(r"^[\W_]+|[\W_]+$")
 # The owner's own frequent words (from layout.py, generated from their
 # Telegram corpus). The model is never allowed to replace these: slang like
 # "patamushta" or Ukrainian words the model likes to russify are protected.
-_PROTECTED_VOCAB = layout._VOCAB_RU | layout._VOCAB_UK
+_PROTECTED_VOCAB = (layout._VOCAB_RU | layout._VOCAB_UK) if layout else set()
 
 
 def _core(w: str) -> str:
@@ -245,7 +252,7 @@ def correct(text: str, cfg: dict | None = None, glossary: list[str] | None = Non
     if len(text) > cfg.get("max_chars", 4000):
         raise CorrectionError("Selection too long - raise max_chars in config.json if intended.")
 
-    if cfg.get("fix_layout", True):
+    if cfg.get("fix_layout", True) and layout is not None:
         # Deterministic pre-pass: text typed with the wrong keyboard layout
         # active (Cyrillic intent, Latin letters) is converted back before
         # the model ever sees it. Zero latency, zero hallucination risk.

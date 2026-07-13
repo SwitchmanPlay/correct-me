@@ -1,0 +1,29 @@
+# --- personal data: never commit ---
+result.json
+corpus.jsonl
+train/train.jsonl
+train/val.jsonl
+train/prompt.txt
+eval/evalset.jsonl
+*failures*.jsonl
+*eval_results*.json
+*.log
+layout.py
+glossary.json
+config.json
+
+# --- model artifacts: weights fine-tuned on private chats can memorize them ---
+lora-*/
+merged-*/
+llama.cpp/
+*.gguf
+
+# --- build junk ---
+venv*/
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+*.exe
+*.zip
